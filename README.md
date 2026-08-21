@@ -39,18 +39,34 @@ No kernel extension. No system modification. Just a program you run.
 > for sound, point the app's audio output at your Mac's built-in output or any
 > other interface. Native V7 audio is [on the roadmap](docs/ROADMAP.md).
 
-## Build
+## Install — the easy way (no Terminal)
+
+1. Download **OpenV7.dmg** from the [Releases](../../releases) page.
+2. Open it and drag **OpenV7** into **Applications**.
+3. Double-click **OpenV7**. First launch only: right-click it ▸ **Open** ▸ **Open**
+   (the build isn't notarized, so Gatekeeper asks once).
+4. A **◉ V7** icon appears in the menu bar. Plug in the V7 — it shows *connected*.
+5. Optional: menu ▸ **Open at Login** to start it automatically every boot.
+
+No Homebrew, no Terminal, no kernel driver. `libusb` is bundled inside the app.
+Now open your DJ app and pick **Numark V7** as a MIDI controller.
+
+The menu-bar app runs the bridge in the background, shows connection status,
+reconnects automatically on replug, and quits cleanly from its menu.
+
+---
+
+## Build from source (developers)
 
 Requires the Xcode command-line tools and `libusb`:
 
 ```sh
 brew install libusb
-make
+make          # command-line bridge -> ./openv7
+make app      # self-contained OpenV7.app + OpenV7.dmg in ./build
 ```
 
-This produces the `openv7` binary.
-
-## Run
+## Run the CLI
 
 Plug in the V7, power it on, then:
 

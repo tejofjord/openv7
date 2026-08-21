@@ -178,9 +178,11 @@ static int ploytec_handshake(void) {
 
 /* ---- USB transfer callbacks ---- */
 static void LIBUSB_CALL iso_cb(struct libusb_transfer *t) {
+    if (t->status == LIBUSB_TRANSFER_NO_DEVICE) { g_quit = 1; return; }  /* unplugged */
     if (!g_quit) libusb_submit_transfer(t);           /* silence buffer already zero */
 }
 static void LIBUSB_CALL drain_cb(struct libusb_transfer *t) {
+    if (t->status == LIBUSB_TRANSFER_NO_DEVICE) { g_quit = 1; return; }
     if (!g_quit) libusb_submit_transfer(t);           /* discard audio-return */
 }
 static void LIBUSB_CALL out_cb(struct libusb_transfer *t) {
@@ -204,6 +206,7 @@ static void LIBUSB_CALL ctrl_in_cb(struct libusb_transfer *t) {
             }
         }
     }
+    if (t->status == LIBUSB_TRANSFER_NO_DEVICE) { g_quit = 1; return; }
     if (!g_quit) libusb_submit_transfer(t);
 }
 

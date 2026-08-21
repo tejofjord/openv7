@@ -12,14 +12,19 @@ CFLAGS   += -Wno-deprecated-declarations
 LDFLAGS  += $(shell pkg-config --libs libusb-1.0)
 LDFLAGS  += -framework CoreMIDI -framework CoreFoundation
 
-.PHONY: all clean install uninstall
+.PHONY: all clean install uninstall app
 all: $(BIN)
 
 $(BIN): $(SRC) src/ploytec.h
 	$(CC) $(CFLAGS) $(SRC) -o $(BIN) $(LDFLAGS)
 
+# Build the self-contained menu-bar app (OpenV7.app) + drag-to-install DMG.
+app:
+	./dist/build-app.sh
+
 clean:
 	rm -f $(BIN)
+	rm -rf build
 
 install: $(BIN)
 	install -d $(PREFIX)/bin

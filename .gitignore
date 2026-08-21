@@ -1,7 +1,10 @@
 # build output
 /openv7
+/build/
 *.o
 *.dSYM/
+*.app/
+*.dmg
 
 # macOS
 .DS_Store
