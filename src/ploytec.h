@@ -27,6 +27,7 @@
 #define V7_EP_AUX_IN        0x86     /* bulk IN  — audio return (drained) */
 
 #define V7_ISO_PKT_SIZE     156      /* wMaxPacketSize of the iso-OUT endpoint */
+#define V7_ISO_IN_PKT_SIZE  64       /* wMaxPacketSize of the iso-IN endpoint (must be drained) */
 #define V7_NUM_INTERFACES   2
 #define V7_ALT_SETTING      1
 

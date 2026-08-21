@@ -185,6 +185,11 @@ static void LIBUSB_CALL drain_cb(struct libusb_transfer *t) {
     if (t->status == LIBUSB_TRANSFER_NO_DEVICE) { g_quit = 1; return; }
     if (!g_quit) libusb_submit_transfer(t);           /* discard audio-return */
 }
+static void LIBUSB_CALL isoin_cb(struct libusb_transfer *t) {
+    if (t->status == LIBUSB_TRANSFER_NO_DEVICE) { g_quit = 1; return; }
+    if (!g_quit) libusb_submit_transfer(t);           /* drain iso-IN — REQUIRED or the
+                                                         device stalls its control stream */
+}
 static void LIBUSB_CALL out_cb(struct libusb_transfer *t) {
     free(t->buffer);
     libusb_free_transfer(t);
@@ -265,6 +270,17 @@ int main(int argc, char **argv) {
                                  V7_ISO_PKT_SIZE * ISO_NPKT, ISO_NPKT, iso_cb, NULL, 1000);
         libusb_set_iso_packet_lengths(iso[i], V7_ISO_PKT_SIZE);
         libusb_submit_transfer(iso[i]);
+    }
+    /* iso-IN: the device stalls its control stream unless this endpoint is
+       actively drained — the fix for "controls only report at startup". */
+    struct libusb_transfer *isoin[ISO_NXFER];
+    for (int i = 0; i < ISO_NXFER; i++) {
+        unsigned char *b = calloc(1, V7_ISO_IN_PKT_SIZE * ISO_NPKT);
+        isoin[i] = libusb_alloc_transfer(ISO_NPKT);
+        libusb_fill_iso_transfer(isoin[i], g_dev, V7_EP_AUDIO_IN, b,
+                                 V7_ISO_IN_PKT_SIZE * ISO_NPKT, ISO_NPKT, isoin_cb, NULL, 1000);
+        libusb_set_iso_packet_lengths(isoin[i], V7_ISO_IN_PKT_SIZE);
+        libusb_submit_transfer(isoin[i]);
     }
     /* control-IN and audio-return-drain reads */
     static unsigned char cin[512], aux[512];
