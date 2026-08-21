@@ -54,6 +54,11 @@ Now open your DJ app and pick **Numark V7** as a MIDI controller.
 The menu-bar app runs the bridge in the background, shows connection status,
 reconnects automatically on replug, and quits cleanly from its menu.
 
+**Menu ▸ Open Tester…** (⌘T) opens a native window with a diagram of the V7:
+press any control and it lights up, use **Learn mode** to map controls (then
+**Export map** to the clipboard), drive the **motor** with the output-test
+buttons, watch the raw MIDI log, and follow the **Calibration** walkthrough.
+
 ---
 
 ## Install — for technical users (Terminal)
