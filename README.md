@@ -56,22 +56,26 @@ reconnects automatically on replug, and quits cleanly from its menu.
 
 ---
 
-## Build from source (developers)
+## Install — for technical users (Terminal)
 
-Requires the Xcode command-line tools and `libusb`:
+Prefer the command line, or want to build from source so you don't have to trust
+a prebuilt binary? Everything builds with `make`. The only build-time dependency
+is `libusb`.
 
 ```sh
+git clone https://github.com/tejofjord/openv7
+cd openv7
 brew install libusb
-make          # command-line bridge -> ./openv7
-make app      # self-contained OpenV7.app + OpenV7.dmg in ./build
+
+make                 # -> ./openv7   (the CLI bridge)
+sudo make install    # optional: install openv7 to /usr/local/bin
+make app             # optional: build build/OpenV7.app + OpenV7.dmg yourself
 ```
 
-## Run the CLI
-
-Plug in the V7, power it on, then:
+Run it (plug in and power on the V7 first):
 
 ```sh
-./openv7            # add -v to watch decoded MIDI, --learn to map controls
+openv7               # -v prints decoded MIDI, --learn maps controls
 ```
 
 You should see:
@@ -146,6 +150,26 @@ Full protocol details, endpoint map, and the motor command set are in
   Heath Xone devices.
 - The V7 control/MIDI map draws on the **[Mixxx](https://github.com/mixxxdj/mixxx)**
   community mapping.
+
+## Trust & verification
+
+OpenV7 is fully open source — read every line, and build it yourself so you
+never have to trust a binary you didn't compile.
+
+- **Build from source** (highest trust): `make` for the CLI, or `make app` for
+  the GUI. The only external dependency is `libusb`, and the release app statically
+  bundles it — no network calls, no phone-home, no background updater.
+- **Verify a download**: each release ships a `SHA256SUMS.txt`. In the folder
+  with the downloaded DMG:
+
+  ```sh
+  shasum -a 256 -c SHA256SUMS.txt
+  ```
+
+- **Code signing**: the released app is **ad-hoc signed but not Apple-notarized**
+  (notarization requires a paid Apple Developer ID). Gatekeeper therefore prompts
+  once on first launch — right-click ▸ **Open** ▸ **Open**. Building from source
+  sidesteps this entirely.
 
 ## Legal
 
