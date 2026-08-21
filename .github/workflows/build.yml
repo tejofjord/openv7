@@ -1,0 +1,19 @@
+name: build
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+
+jobs:
+  macos:
+    name: build (macOS)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install libusb
+        run: brew install libusb
+      - name: Build
+        run: make
+      - name: Sanity check
+        run: ./openv7 --help
