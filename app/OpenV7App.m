@@ -221,13 +221,21 @@ static NSColor *HEX(int r,int g,int b,double a){ return [NSColor colorWithSRGBRe
 @property (assign) MIDIPortRef outPort;    // to send to device
 @property (assign) MIDIEndpointRef dest;   // send target
 @property (assign) BOOL connected;
-@property (assign) long midiCount;
 @property (strong) NSTimer *timer2;
 @property (strong) NSTextField *midiStat;
-- (void)handleStatus:(uint8_t)s d0:(uint8_t)d0 d1:(uint8_t)d1;
+- (void)flushRx;
 @end
 
 static AppDelegate *gApp;
+
+/* Decouple UI from MIDI rate: the CoreMIDI thread only appends to a ring and
+   bumps a counter; a 30fps timer on the main thread drains it. Prevents the
+   high-rate platter stream from flooding/freezing the main run loop. */
+#import <pthread.h>
+#define RXQ 8192
+static struct rxm { uint8_t s, d0, d1; } g_rxq[RXQ];
+static volatile long g_rxw = 0, g_rxr = 0, g_rxcount = 0;
+static pthread_mutex_t g_rxmtx = PTHREAD_MUTEX_INITIALIZER;
 
 static MIDIEndpointRef findEndpointNamed(NSString *name, BOOL source) {
     ItemCount n = source?MIDIGetNumberOfSources():MIDIGetNumberOfDestinations();
@@ -244,19 +252,20 @@ static MIDIEndpointRef findEndpointNamed(NSString *name, BOOL source) {
 static void MIDIReadCB(const MIDIPacketList *pl, void *a, void *b) {
     (void)a;(void)b;
     const MIDIPacket *p=&pl->packet[0];
+    pthread_mutex_lock(&g_rxmtx);
     for(unsigned i=0;i<pl->numPackets;i++){
-        for(unsigned j=0;j+2<p->length || (j<p->length);){
+        for(unsigned j=0;j<p->length;){
             uint8_t s=p->data[j];
-            if(s<0x80){ j++; continue; }
-            if(s>=0xF8){ j++; continue; }
+            if(s<0x80 || s>=0xF8){ j++; continue; }
             uint8_t d0=(j+1<p->length)?p->data[j+1]:0;
             uint8_t d1=(j+2<p->length)?p->data[j+2]:0;
             int len=((s&0xF0)==0xC0||(s&0xF0)==0xD0)?2:3;
-            dispatch_async(dispatch_get_main_queue(), ^{ [gApp handleStatus:s d0:d0 d1:d1]; });
+            g_rxq[g_rxw % RXQ]=(struct rxm){s,d0,d1}; g_rxw++; g_rxcount++;
             j+=len;
         }
         p=MIDIPacketNext(p);
     }
+    pthread_mutex_unlock(&g_rxmtx);
 }
 
 @implementation AppDelegate
@@ -295,23 +304,34 @@ static void MIDIReadCB(const MIDIPacketList *pl, void *a, void *b) {
 - (void)updateMidiStat {
     if(!_midiStat) return;
     _midiStat.stringValue = [NSString stringWithFormat:@"MIDI: %@ · %ld msgs in",
-        _connected?@"connected":@"waiting for bridge…", _midiCount];
+        _connected?@"connected":@"waiting for bridge…", g_rxcount];
     _midiStat.textColor = _connected ? HEX(59,189,138,1) : HEX(217,150,58,1);
 }
 
-- (void)handleStatus:(uint8_t)s d0:(uint8_t)d0 d1:(uint8_t)d1 {
-    _midiCount++; [self updateMidiStat];
-    if([_dev bindArmedToStatus:s d0:d0]){ [self updateLearnTitle]; }
-    [_dev flashStatus:s d0:d0 d1:d1];
-    BOOL hb=(s==0xB0 && (d0==0x7d||d0==0x6e));
-    if(!hb && _log){
-        const char *t=((s&0xF0)==0xB0)?"CC":((s&0xF0)==0x90)?"Note+":((s&0xF0)==0x80)?"Note-":((s&0xF0)==0xE0)?"Pitch":"?";
-        NSString *line=[NSString stringWithFormat:@"%02x %02x %02x   %s\n",s,d0,d1,t];
-        NSAttributedString *as=[[NSAttributedString alloc] initWithString:line attributes:@{
+- (void)flushRx {
+    [self updateMidiStat];
+    if(!_dev) return;
+    pthread_mutex_lock(&g_rxmtx);
+    if(g_rxw - g_rxr > RXQ) g_rxr = g_rxw - RXQ;          /* dropped overflow */
+    NSMutableString *batch=[NSMutableString string]; int shown=0; BOOL learned=NO;
+    while(g_rxr < g_rxw){
+        struct rxm m=g_rxq[g_rxr % RXQ]; g_rxr++;
+        if([_dev bindArmedToStatus:m.s d0:m.d0]) learned=YES;
+        [_dev flashStatus:m.s d0:m.d0 d1:m.d1];
+        BOOL hb=(m.s==0xB0 && (m.d0==0x7d||m.d0==0x6e));
+        if(!hb && shown<24){
+            const char *t=((m.s&0xF0)==0xB0)?"CC":((m.s&0xF0)==0x90)?"On":((m.s&0xF0)==0x80)?"Off":((m.s&0xF0)==0xE0)?"Pitch":"?";
+            [batch appendFormat:@"%02x %02x %02x  %s\n",m.s,m.d0,m.d1,t]; shown++;
+        }
+    }
+    pthread_mutex_unlock(&g_rxmtx);
+    if(learned) [self updateLearnTitle];
+    if(batch.length && _log){
+        NSAttributedString *as=[[NSAttributedString alloc] initWithString:batch attributes:@{
             NSFontAttributeName:[NSFont monospacedSystemFontOfSize:11 weight:NSFontWeightRegular],
             NSForegroundColorAttributeName:HEX(180,190,205,1)}];
         [_log.textStorage appendAttributedString:as];
-        if(_log.textStorage.length>16000) [_log.textStorage deleteCharactersInRange:NSMakeRange(0,4000)];
+        if(_log.textStorage.length>12000) [_log.textStorage deleteCharactersInRange:NSMakeRange(0,4000)];
         [_log scrollRangeToVisible:NSMakeRange(_log.textStorage.length,0)];
     }
 }
@@ -364,7 +384,7 @@ static void MIDIReadCB(const MIDIPacketList *pl, void *a, void *b) {
     [NSApp activateIgnoringOtherApps:YES];
     if(!_timer2) _timer2=[NSTimer scheduledTimerWithTimeInterval:1.0/30 target:self selector:@selector(anim) userInfo:nil repeats:YES];
 }
-- (void)anim { if(_tester.isVisible) _dev.needsDisplay=YES; }
+- (void)anim { if(_tester.isVisible){ [self flushRx]; _dev.needsDisplay=YES; } }
 
 - (void)deviceViewDidArm:(V7Control*)c { [self updateLearnTitle]; }
 - (void)updateLearnTitle {
