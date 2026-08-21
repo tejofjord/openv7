@@ -13,8 +13,8 @@ The most reliable path while the full control map is still being verified:
    pick the VirtualDJ action to bind, repeat for each control.
 4. VirtualDJ saves your mapping automatically.
 
-Tip: run `./openv7 -v` in a terminal to watch each control's MIDI as you touch
-it — handy for confirming which message a button sends.
+Tip: run `./openv7 --learn`, touch every control once, and press Ctrl-C for a
+catalog of each control's MIDI message — the fastest way to confirm what to map.
 
 ## Option B — starter definition file
 
@@ -33,7 +33,7 @@ Then restart VirtualDJ and select **Numark V7** under Controllers.
 
 > ⚠️ This file is a work in progress. The jog/platter and motor lines are based
 > on captured traffic; the button/pad note numbers are placeholders. Please
-> contribute confirmed values back — run `openv7 -v`, note each control's
+> contribute confirmed values back — run `openv7 --learn`, note each control's
 > message, and open a PR updating both this file and `docs/PROTOCOL.md`.
 
 ## Motor / LED output

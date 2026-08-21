@@ -34,6 +34,53 @@ static MIDIEndpointRef      g_source;   /* device -> apps */
 static MIDIEndpointRef      g_dest;     /* apps -> device */
 static volatile sig_atomic_t g_quit = 0;
 static int g_verbose = 0;
+static int g_learn   = 0;
+
+/* ---- learn mode: catalog each distinct control as it's touched ---- */
+struct cat_entry { int key; uint8_t status, d0, vmin, vmax; long count; };
+static struct cat_entry g_cat[256];
+static int g_ncat = 0;
+
+static const char *ctrl_label(uint8_t s, uint8_t d0) {
+    switch (s & 0xF0) {
+        case 0xB0:
+            switch (d0) {
+                case 0x00: return "jog / platter position (deck A)";
+                case 0x02: return "jog / platter position (deck B)";
+                case 0x43: return "motor start";   case 0x44: return "motor brake";
+                case 0x45: return "RPM select";    case 0x46: return "direction";
+                case 0x47: return "start-time";    case 0x48: return "brake-time";
+                case 0x6e: case 0x7d: return "(idle heartbeat)";
+            }
+            return "CC";
+        case 0xE0: return "pitch-bend (platter timestamp / pitch fader)";
+        case 0x90: return "button / pad down";
+        case 0x80: return "button / pad up";
+    }
+    return "";
+}
+static void learn_note(uint8_t s, uint8_t d0, uint8_t d1) {
+    int key = ((s & 0xF0) == 0xE0) ? (s << 8) : ((s << 8) | d0);
+    for (int i = 0; i < g_ncat; i++) if (g_cat[i].key == key) {
+        if (d1 < g_cat[i].vmin) g_cat[i].vmin = d1;
+        if (d1 > g_cat[i].vmax) g_cat[i].vmax = d1;
+        g_cat[i].count++;
+        return;
+    }
+    if (g_ncat < 256) {
+        g_cat[g_ncat] = (struct cat_entry){ key, s, d0, d1, d1, 1 };
+        g_ncat++;
+        if (!(s == 0xB0 && (d0 == 0x6e || d0 == 0x7d)))   /* skip heartbeat */
+            fprintf(stderr, "  NEW control:  %02x %02x   %s\n", s, d0, ctrl_label(s, d0));
+    }
+}
+static void learn_dump(void) {
+    fprintf(stderr, "\n===== control catalog: %d unique =====\n", g_ncat);
+    for (int i = 0; i < g_ncat; i++)
+        fprintf(stderr, "  %02x %02x  val %3u..%-3u  x%-6ld %s\n",
+                g_cat[i].status, g_cat[i].d0, g_cat[i].vmin, g_cat[i].vmax,
+                g_cat[i].count, ctrl_label(g_cat[i].status, g_cat[i].d0));
+}
 
 #define ISO_NPKT   16
 #define ISO_NXFER  4
@@ -148,6 +195,7 @@ static void LIBUSB_CALL ctrl_in_cb(struct libusb_transfer *t) {
             int n = midi_feed(&g_in, t->buffer[i], out);
             if (n > 0) {
                 midi_to_apps(out, n);
+                if (g_learn) learn_note(out[0], out[1], n == 3 ? out[2] : 0);
                 if (g_verbose) {
                     fprintf(stderr, "  in  ");
                     for (int k = 0; k < n; k++) fprintf(stderr, "%02x ", out[k]);
@@ -171,8 +219,17 @@ static void submit_out(const unsigned char *frame) {
 static void on_sigint(int s) { (void)s; g_quit = 1; }
 
 int main(int argc, char **argv) {
-    for (int i = 1; i < argc; i++)
+    for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "-v") || !strcmp(argv[i], "--verbose")) g_verbose = 1;
+        else if (!strcmp(argv[i], "--learn")) g_learn = 1;
+        else if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help")) {
+            printf("OpenV7 — Numark V7 userspace driver\n"
+                   "usage: openv7 [-v|--verbose] [--learn]\n"
+                   "  -v        print decoded MIDI as it arrives\n"
+                   "  --learn   catalog each control once (touch every control, Ctrl-C for the map)\n");
+            return 0;
+        }
+    }
 
     signal(SIGINT, on_sigint);
     signal(SIGTERM, on_sigint);
@@ -215,7 +272,10 @@ int main(int argc, char **argv) {
     libusb_submit_transfer(t_in);
     libusb_submit_transfer(t_aux);
 
-    fprintf(stderr, "OpenV7: running. Select \"Numark V7\" in your DJ app. Ctrl-C to stop.\n");
+    if (g_learn)
+        fprintf(stderr, "OpenV7: LEARN mode — touch every control once, then Ctrl-C for the map.\n");
+    else
+        fprintf(stderr, "OpenV7: running. Select \"Numark V7\" in your DJ app. Ctrl-C to stop.\n");
 
     while (!g_quit) {
         struct timeval tv = { 0, 20000 };
@@ -230,6 +290,7 @@ int main(int argc, char **argv) {
     }
 
     fprintf(stderr, "\nOpenV7: shutting down.\n");
+    if (g_learn) learn_dump();
     g_quit = 1;
     struct timeval tv = { 0, 200000 };
     libusb_handle_events_timeout(g_ctx, &tv);

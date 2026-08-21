@@ -55,7 +55,7 @@ This produces the `openv7` binary.
 Plug in the V7, power it on, then:
 
 ```sh
-./openv7            # add -v to watch decoded MIDI
+./openv7            # add -v to watch decoded MIDI, --learn to map controls
 ```
 
 You should see:
@@ -70,6 +70,31 @@ OpenV7: running. Select "Numark V7" in your DJ app. Ctrl-C to stop.
 
 Leave it running. A CoreMIDI device named **Numark V7** now appears in
 *Audio MIDI Setup ▸ MIDI Studio* and in any DAW/DJ app.
+
+## Map your controls (`--learn`)
+
+To discover exactly which MIDI message each control sends, run:
+
+```sh
+./openv7 --learn
+```
+
+Touch every control once — each new one prints as it's seen — then press
+`Ctrl-C` for a catalog with value ranges. Use it to fill in the VirtualDJ
+mapping and `docs/PROTOCOL.md`.
+
+## Auto-start (optional)
+
+To keep the bridge running automatically (and restart it on replug), install
+the LaunchAgent:
+
+```sh
+make install
+cp dist/launchd/com.openv7.bridge.plist ~/Library/LaunchAgents/
+launchctl load ~/Library/LaunchAgents/com.openv7.bridge.plist
+```
+
+See the plist header for uninstall steps.
 
 ## Use with VirtualDJ
 

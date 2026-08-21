@@ -5,7 +5,7 @@
 - [x] Control-IN → CoreMIDI virtual source
 - [x] CoreMIDI virtual destination → control-OUT (LEDs, motor)
 - [x] VirtualDJ starter mapping
-- [ ] Confirm the full per-control MIDI map on hardware (run `openv7 -v` and
+- [ ] Confirm the full per-control MIDI map on hardware (run `openv7 --learn` and
       operate each control)
 - [ ] Confirm platter reverse (see PROTOCOL.md open item)
 

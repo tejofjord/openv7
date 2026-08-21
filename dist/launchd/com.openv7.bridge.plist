@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  OpenV7 LaunchAgent — keeps the bridge running so the V7 works automatically.
+
+  Install:
+    make install                      # puts openv7 in /usr/local/bin
+    cp dist/launchd/com.openv7.bridge.plist ~/Library/LaunchAgents/
+    launchctl load  ~/Library/LaunchAgents/com.openv7.bridge.plist
+
+  Uninstall:
+    launchctl unload ~/Library/LaunchAgents/com.openv7.bridge.plist
+    rm ~/Library/LaunchAgents/com.openv7.bridge.plist
+
+  KeepAlive restarts the bridge if the V7 is unplugged/replugged (openv7 exits
+  when the device isn't present, and launchd relaunches it a few seconds later).
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.openv7.bridge</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/local/bin/openv7</string>
+    </array>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>ThrottleInterval</key>
+    <integer>5</integer>
+
+    <key>StandardOutPath</key>
+    <string>/tmp/openv7.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/openv7.log</string>
+</dict>
+</plist>
