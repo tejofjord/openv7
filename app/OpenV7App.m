@@ -218,9 +218,12 @@ static NSColor *HEX(int r,int g,int b,double a){ return [NSColor colorWithSRGBRe
 // CoreMIDI
 @property (assign) MIDIClientRef client;
 @property (assign) MIDIPortRef inPort;
-@property (assign) MIDIEndpointRef dest;   // to send to device
+@property (assign) MIDIPortRef outPort;    // to send to device
+@property (assign) MIDIEndpointRef dest;   // send target
 @property (assign) BOOL connected;
+@property (assign) long midiCount;
 @property (strong) NSTimer *timer2;
+@property (strong) NSTextField *midiStat;
 - (void)handleStatus:(uint8_t)s d0:(uint8_t)d0 d1:(uint8_t)d1;
 @end
 
@@ -275,20 +278,29 @@ static void MIDIReadCB(const MIDIPacketList *pl, void *a, void *b) {
 - (void)connectMIDI {
     if(!_client) MIDIClientCreate(CFSTR("OpenV7 Tester"), NULL, NULL, &_client);
     if(!_inPort) MIDIInputPortCreate(_client, CFSTR("in"), MIDIReadCB, NULL, &_inPort);
+    if(!_outPort) MIDIOutputPortCreate(_client, CFSTR("out"), &_outPort);
     MIDIEndpointRef src=findEndpointNamed(@"Numark V7", YES);
     _dest = findEndpointNamed(@"Numark V7", NO);
-    if(src){ MIDIPortConnectSource(_inPort, src, NULL); _connected=YES; }
-    else _connected=NO;
+    if(src && !_connected){ MIDIPortConnectSource(_inPort, src, NULL); }
+    _connected = (src!=0);
+    [self updateMidiStat];
 }
 - (void)sendBytes:(const uint8_t*)b len:(int)n {
     if(!_dest) _dest=findEndpointNamed(@"Numark V7", NO);
-    if(!_dest) return;
+    if(!_dest || !_outPort) return;
     Byte buf[64]; MIDIPacketList *pl=(MIDIPacketList*)buf; MIDIPacket *p=MIDIPacketListInit(pl);
     p=MIDIPacketListAdd(pl,sizeof buf,p,0,n,b);
-    MIDISend(_inPort, _dest, pl);   // any output port works; reuse inPort's client
+    MIDISend(_outPort, _dest, pl);
+}
+- (void)updateMidiStat {
+    if(!_midiStat) return;
+    _midiStat.stringValue = [NSString stringWithFormat:@"MIDI: %@ · %ld msgs in",
+        _connected?@"connected":@"waiting for bridge…", _midiCount];
+    _midiStat.textColor = _connected ? HEX(59,189,138,1) : HEX(217,150,58,1);
 }
 
 - (void)handleStatus:(uint8_t)s d0:(uint8_t)d0 d1:(uint8_t)d1 {
+    _midiCount++; [self updateMidiStat];
     if([_dev bindArmedToStatus:s d0:d0]){ [self updateLearnTitle]; }
     [_dev flashStatus:s d0:d0 d1:d1];
     BOOL hb=(s==0xB0 && (d0==0x7d||d0==0x6e));
@@ -335,7 +347,11 @@ static void MIDIReadCB(const MIDIPacketList *pl, void *a, void *b) {
     NSTextField *tl=[NSTextField labelWithString:@"Output test:"]; tl.frame=NSMakeRect(px,556,pw,16);
     tl.font=[NSFont systemFontOfSize:10]; tl.textColor=HEX(139,147,165,1); [cv addSubview:tl];
 
-    NSScrollView *sv=[[NSScrollView alloc] initWithFrame:NSMakeRect(px,16,pw,496)];
+    _midiStat=[NSTextField labelWithString:@"MIDI: waiting for bridge…"];
+    _midiStat.frame=NSMakeRect(px,490,pw,18); _midiStat.font=[NSFont monospacedSystemFontOfSize:11 weight:NSFontWeightMedium];
+    [cv addSubview:_midiStat]; [self updateMidiStat];
+
+    NSScrollView *sv=[[NSScrollView alloc] initWithFrame:NSMakeRect(px,16,pw,466)];
     sv.hasVerticalScroller=YES; sv.borderType=NSLineBorder; sv.autoresizingMask=NSViewHeightSizable|NSViewMinXMargin;
     _log=[[NSTextView alloc] initWithFrame:sv.bounds]; _log.editable=NO; _log.drawsBackground=YES;
     _log.backgroundColor=HEX(10,13,19,1); _log.textContainerInset=NSMakeSize(6,6);
@@ -405,6 +421,7 @@ static void MIDIReadCB(const MIDIPacketList *pl, void *a, void *b) {
     _statusLine.title = up ? @"Numark V7 — connected" : @"Numark V7 — not found (plug it in)";
     if(@available(macOS 13.0,*))
         _loginItem.state=(SMAppService.mainAppService.status==SMAppServiceStatusEnabled)?NSControlStateValueOn:NSControlStateValueOff;
+    [self updateMidiStat];
 }
 - (void)toggleLogin:(id)s { (void)s;
     if(@available(macOS 13.0,*)){ NSError *e=nil; SMAppService *svc=SMAppService.mainAppService;
