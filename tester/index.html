@@ -1,0 +1,332 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OpenV7 Tester</title>
+<style>
+  :root{
+    --bg:#0b0e14; --panel:#141922; --panel2:#1a2130; --line:#242c3a;
+    --ink:#e7eaf1; --muted:#8b93a5; --faint:#5b6473;
+    --accent:#2f8bff; --accent-dim:#0e63e6; --cyan:#4cc9ff;
+    --ok:#3bbd8a; --warn:#d9963a; --hot:#ff5c7a;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:14px/1.5 ui-sans-serif,-apple-system,"SF Pro Text",system-ui,sans-serif}
+  header{display:flex;align-items:center;gap:14px;padding:14px 20px;border-bottom:1px solid var(--line);
+    position:sticky;top:0;background:rgba(11,14,20,.9);backdrop-filter:blur(8px);z-index:5}
+  header h1{font-size:16px;margin:0;font-weight:700;letter-spacing:-.01em}
+  header h1 b{color:var(--accent)}
+  .pill{font:600 11px ui-monospace,monospace;padding:4px 9px;border-radius:999px;border:1px solid var(--line)}
+  .pill.on{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 40%,transparent);background:color-mix(in srgb,var(--ok) 12%,transparent)}
+  .pill.off{color:var(--faint)}
+  .tabs{display:flex;gap:4px;margin-left:auto}
+  .tabs button{background:none;border:1px solid transparent;color:var(--muted);padding:6px 12px;border-radius:8px;cursor:pointer;font:inherit;font-weight:600}
+  .tabs button.active{color:var(--ink);background:var(--panel2);border-color:var(--line)}
+  .wrap{max-width:1080px;margin:0 auto;padding:20px;display:grid;grid-template-columns:1fr 320px;gap:20px}
+  @media(max-width:900px){.wrap{grid-template-columns:1fr}}
+  .toolbar{grid-column:1/-1;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  button.btn{background:var(--panel2);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:8px 14px;cursor:pointer;font:inherit;font-weight:600}
+  button.btn:hover{border-color:var(--accent)}
+  button.btn.primary{background:var(--accent-dim);border-color:var(--accent)}
+  button.btn.armed{background:color-mix(in srgb,var(--warn) 25%,transparent);border-color:var(--warn);color:var(--warn)}
+  .hint{color:var(--muted);font-size:13px}
+
+  /* ---- device diagram ---- */
+  .deck{position:relative;background:linear-gradient(160deg,#1b2330,#0c1017);border:1px solid var(--line);
+    border-radius:18px;aspect-ratio:62/72;overflow:hidden}
+  .ctl{position:absolute;display:flex;align-items:center;justify-content:center;text-align:center;
+    border:1px solid var(--line);background:var(--panel);color:var(--muted);border-radius:8px;
+    font:600 10px ui-sans-serif,system-ui;cursor:pointer;user-select:none;transition:all .09s;padding:2px}
+  .ctl:hover{border-color:var(--accent)}
+  .ctl.mapped{color:var(--ink);border-color:#33405a}
+  .ctl.armed{border-color:var(--warn);box-shadow:0 0 0 2px color-mix(in srgb,var(--warn) 40%,transparent)}
+  .ctl.hit{background:var(--accent);color:#fff;border-color:var(--cyan);box-shadow:0 0 18px var(--cyan)}
+  .ctl.pad.hit{background:var(--hot);box-shadow:0 0 18px var(--hot)}
+  .platter{position:absolute;border-radius:50%;background:radial-gradient(circle at 38% 32%,#22262e,#08080b);
+    border:1px solid #2a2f3a;display:flex;align-items:center;justify-content:center}
+  .platter .lbl{position:absolute;bottom:12%;font:600 10px ui-monospace,monospace;color:var(--faint)}
+  .platter .disc{width:34%;height:34%;border-radius:50%;background:linear-gradient(160deg,var(--accent),var(--accent-dim));
+    color:#fff;font:800 15px ui-sans-serif;display:flex;align-items:center;justify-content:center;transition:transform .05s linear}
+  .fader{position:absolute;background:var(--panel);border:1px solid var(--line);border-radius:8px}
+  .fader .cap{position:absolute;left:2px;right:2px;height:12%;background:linear-gradient(var(--accent),var(--accent-dim));border-radius:4px;transition:top .05s}
+  .strip{position:absolute;background:var(--panel);border:1px solid var(--line);border-radius:6px;overflow:hidden}
+  .strip .dot{position:absolute;top:0;bottom:0;width:6px;background:var(--cyan);box-shadow:0 0 12px var(--cyan);opacity:0;transition:opacity .1s}
+
+  /* ---- side panel ---- */
+  .side{display:flex;flex-direction:column;gap:14px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px}
+  .card h3{margin:0 0 10px;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--faint)}
+  .mon{height:260px;overflow:auto;font:12px/1.6 ui-monospace,monospace;background:#0a0d13;border:1px solid var(--line);border-radius:8px;padding:8px}
+  .mon .row{display:flex;gap:8px;color:var(--muted)}
+  .mon .row b{color:var(--cyan)}
+  .mon .row.hb{color:var(--faint);opacity:.6}
+  .stat{display:flex;justify-content:space-between;font-size:13px;padding:3px 0;color:var(--muted)}
+  .stat b{color:var(--ink);font-variant-numeric:tabular-nums}
+  label.chk{display:flex;gap:8px;align-items:center;color:var(--muted);font-size:13px;cursor:pointer}
+
+  /* ---- calibration ---- */
+  .cal{max-width:760px;margin:0 auto;padding:20px}
+  .cal ol{padding-left:0;list-style:none;counter-reset:step}
+  .cal li{counter-increment:step;position:relative;padding:14px 14px 14px 52px;border:1px solid var(--line);
+    border-radius:10px;margin:8px 0;background:var(--panel)}
+  .cal li::before{content:counter(step);position:absolute;left:12px;top:12px;width:26px;height:26px;border-radius:50%;
+    background:var(--panel2);border:1px solid var(--line);color:var(--accent);font:700 13px ui-monospace,monospace;
+    display:flex;align-items:center;justify-content:center}
+  .cal li.done{opacity:.55}.cal li.done::before{background:var(--ok);color:#04120c;border-color:var(--ok)}
+  .cal .warn{background:color-mix(in srgb,var(--warn) 10%,transparent);border:1px solid color-mix(in srgb,var(--warn) 35%,transparent);
+    border-radius:10px;padding:12px 14px;color:#e9c07a;margin:0 0 16px}
+  .cal b.k{font:600 12px ui-monospace,monospace;background:var(--panel2);border:1px solid var(--line);border-radius:5px;padding:1px 6px}
+  .hidden{display:none!important}
+  a{color:var(--accent)}
+</style>
+</head>
+<body>
+<header>
+  <h1>Open<b>V7</b> Tester</h1>
+  <span id="conn" class="pill off">no MIDI</span>
+  <div class="tabs">
+    <button id="tabTest" class="active" onclick="showTab('test')">Tester</button>
+    <button id="tabCal" onclick="showTab('cal')">Calibration</button>
+  </div>
+</header>
+
+<!-- ================= TESTER ================= -->
+<div id="test" class="wrap">
+  <div class="toolbar">
+    <button id="learnBtn" class="btn" onclick="toggleLearn()">Learn mode: off</button>
+    <button class="btn" onclick="exportMap()">Export mapping</button>
+    <button class="btn" onclick="clearMap()">Clear map</button>
+    <span class="hint">Learn: click a control below, then press it on the V7 to bind its MIDI. Otherwise, press controls to see them light up.</span>
+  </div>
+
+  <div class="deck" id="deck"><!-- controls injected by JS --></div>
+
+  <div class="side">
+    <div class="card">
+      <h3>MIDI monitor</h3>
+      <label class="chk"><input type="checkbox" id="hbFilter" checked onchange="renderMon()"> hide idle heartbeat</label>
+      <div class="mon" id="mon"></div>
+    </div>
+    <div class="card">
+      <h3>Session</h3>
+      <div class="stat">messages <b id="sMsg">0</b></div>
+      <div class="stat">unique controls <b id="sUniq">0</b></div>
+      <div class="stat">mapped <b id="sMapped">0</b></div>
+      <div class="stat">device <b id="sDev">—</b></div>
+    </div>
+  </div>
+</div>
+
+<!-- ================= CALIBRATION ================= -->
+<div id="cal" class="cal hidden">
+  <div class="warn">
+    <b>Calibration is a hardware procedure — do it with the USB cable unplugged.</b>
+    The V7's firmware stores it; OpenV7 can't run it over USB. Follow the steps below on the
+    unit itself, then reconnect and use the <b>Tester</b> tab to verify every fader reaches full
+    travel and the strip search responds end-to-end.
+    Source: <a href="https://support.numark.com/en/support/solutions/articles/69000840452-numark-ns7-v7-calibration-procedure" target="_blank" rel="noopener">Numark NS7/V7 calibration procedure</a>.
+  </div>
+  <ol id="calSteps"></ol>
+  <p class="hint">Tap a step to mark it done. This checklist is a guide; the LEDs on the unit are the source of truth.</p>
+</div>
+
+<script>
+// ---------- device layout (percent-positioned) ----------
+// Approximate Numark V7 single-deck layout. Each control lights up on its mapped MIDI.
+const CONTROLS = [
+  {id:'browse', label:'BROWSE', x:78, y:5, w:16, h:9, kind:'knob'},
+  {id:'load',   label:'LOAD',   x:78, y:16, w:16, h:6},
+  {id:'platter',label:'',       x:22, y:8, w:52, h:46, kind:'platter'},
+  {id:'strip',  label:'STRIP SEARCH', x:22, y:56, w:52, h:5, kind:'strip'},
+  {id:'pitch',  label:'PITCH',  x:88, y:26, w:8,  h:34, kind:'fader'},
+  {id:'keylock',label:'KEYLOCK',x:78, y:26, w:8,  h:6},
+  {id:'range',  label:'RANGE',  x:78, y:34, w:8,  h:6},
+  {id:'reverse',label:'BLEEP\nREV', x:6, y:26, w:12, h:8},
+  {id:'slip',   label:'SLIP',   x:6, y:36, w:12, h:6},
+  {id:'sync',   label:'SYNC',   x:6, y:44, w:12, h:6},
+  {id:'deck',   label:'DECK',   x:6, y:52, w:12, h:6},
+  // transport
+  {id:'cue',    label:'CUE',    x:24, y:64, w:14, h:9, kind:'big'},
+  {id:'play',   label:'PLAY',   x:40, y:64, w:14, h:9, kind:'big'},
+  // loop
+  {id:'loopin', label:'LOOP IN', x:58, y:64, w:12, h:6},
+  {id:'loopout',label:'LOOP OUT',x:58, y:71, w:12, h:6},
+  {id:'autoloop',label:'AUTO\nLOOP',x:72, y:64, w:12, h:13, kind:'knob'},
+  // hot cues
+  {id:'pad1', label:'1', x:6,  y:80, w:10, h:8, kind:'pad'},
+  {id:'pad2', label:'2', x:18, y:80, w:10, h:8, kind:'pad'},
+  {id:'pad3', label:'3', x:30, y:80, w:10, h:8, kind:'pad'},
+  {id:'pad4', label:'4', x:42, y:80, w:10, h:8, kind:'pad'},
+  {id:'pad5', label:'5', x:54, y:80, w:10, h:8, kind:'pad'},
+  {id:'delete',label:'DELETE', x:66, y:80, w:12, h:8},
+  // fx
+  {id:'fxon',  label:'FX ON',  x:80, y:80, w:14, h:8},
+];
+// known-from-hardware mappings (CC on 0xB0). More get added via Learn.
+const DEFAULT_MAP = {
+  platter: {status:0xB0, d0:0x00},   // deck A jog (verified)
+};
+
+// ---------- state ----------
+let map = loadMap();
+let learn = false, armed = null;
+let msgs = [], monBuf = [], uniq = new Set(), count = 0;
+let midiIn = null;
+
+// ---------- build diagram ----------
+const deck = document.getElementById('deck');
+for (const c of CONTROLS){
+  const el = document.createElement('div');
+  el.dataset.id = c.id;
+  el.style.cssText = `left:${c.x}%;top:${c.y}%;width:${c.w}%;height:${c.h}%`;
+  if (c.kind==='platter'){
+    el.className='platter'; el.style.borderRadius='50%';
+    el.innerHTML = `<div class="disc" id="disc">V7</div><span class="lbl">PLATTER</span>`;
+  } else if (c.kind==='fader'){
+    el.className='fader ctl'; el.innerHTML = `<div class="cap" id="cap_${c.id}" style="top:44%"></div>`;
+    const t=document.createElement('span'); t.style.cssText='position:absolute;bottom:-16px;left:0;right:0;font-size:9px;color:var(--faint)'; t.textContent=c.label; el.appendChild(t);
+  } else if (c.kind==='strip'){
+    el.className='strip ctl'; el.innerHTML = `<div class="dot" id="stripdot"></div><span style="position:absolute;left:6px;top:50%;transform:translateY(-50%);font-size:9px;color:var(--faint)">${c.label}</span>`;
+  } else {
+    el.className='ctl'+(c.kind==='pad'?' pad':'')+(c.kind==='big'?' big':'');
+    if(c.kind==='knob') el.style.borderRadius='50%';
+    el.textContent = c.label;
+  }
+  el.onclick = ()=>onControlClick(c.id, el);
+  deck.appendChild(el);
+  markMapped(c.id);
+}
+
+function onControlClick(id, el){
+  if(!learn) return;
+  document.querySelectorAll('.ctl.armed,.platter.armed').forEach(e=>e.classList.remove('armed'));
+  if(armed===id){armed=null; return;}
+  armed=id; el.classList.add('armed');
+}
+
+// ---------- MIDI ----------
+async function initMIDI(){
+  if(!navigator.requestMIDIAccess){ setConn('Web MIDI unsupported (use Chrome)', false); return; }
+  try{
+    const access = await navigator.requestMIDIAccess({sysex:false});
+    const pick = ()=>{
+      let found=null;
+      access.inputs.forEach(i=>{ if(/numark v7|openv7/i.test(i.name)) found=i; });
+      if(!found) access.inputs.forEach(i=>{ if(!found) found=i; }); // fallback: first input
+      if(found && found!==midiIn){ midiIn=found; midiIn.onmidimessage=onMIDI;
+        setConn('connected: '+found.name, true); document.getElementById('sDev').textContent=found.name; }
+      else if(!found){ setConn('run OpenV7, then reload', false); }
+    };
+    pick(); access.onstatechange=pick;
+  }catch(e){ setConn('MIDI permission denied', false); }
+}
+function setConn(t,on){ const p=document.getElementById('conn'); p.textContent=t; p.className='pill '+(on?'on':'off'); }
+
+function onMIDI(ev){
+  const [s,d0,d1] = ev.data;
+  if(s>=0xF8) return;                       // realtime
+  count++; document.getElementById('sMsg').textContent=count;
+  const hb = (s===0xB0 && (d0===0x7d||d0===0x6e));
+  const key = (s&0xF0)===0xE0 ? 'E'+(s&0x0F) : s.toString(16)+'.'+ (d0??0).toString(16);
+  if(!hb){ uniq.add(key); document.getElementById('sUniq').textContent=uniq.size; }
+
+  // learn binding
+  if(learn && armed && !hb){
+    map[armed] = {status:s, d0:d0??0};
+    saveMap(); markMapped(armed);
+    document.querySelectorAll('.armed').forEach(e=>e.classList.remove('armed'));
+    armed=null; updateMappedCount();
+  }
+
+  // light up mapped control
+  const id = findControl(s, d0);
+  if(id) flash(id, s, d0, d1);
+
+  // monitor
+  logMon(s,d0,d1,hb);
+}
+
+function findControl(s,d0){
+  for(const id in map){ const m=map[id];
+    if(m.status===s && (((s&0xF0)===0xE0) || m.d0===d0)) return id; }
+  return null;
+}
+function flash(id,s,d0,d1){
+  if(id==='platter'){ // rotate the disc by jog delta (relative-ish visual)
+    const disc=document.getElementById('disc'); if(disc){ const a=(d1||d0||0); disc.style.transform=`rotate(${a*2.8}deg)`; }
+    return;
+  }
+  if(id==='pitch'){ const cap=document.getElementById('cap_pitch'); if(cap) cap.style.top=(88-((d1||0)/127*82))+'%'; return; }
+  if(id==='strip'){ const dot=document.getElementById('stripdot'); if(dot){ dot.style.left=((d1||0)/127*94)+'%'; dot.style.opacity=1; clearTimeout(dot._t); dot._t=setTimeout(()=>dot.style.opacity=0,180);} return; }
+  const el=deck.querySelector(`[data-id="${id}"]`); if(!el) return;
+  el.classList.add('hit'); clearTimeout(el._t); el._t=setTimeout(()=>el.classList.remove('hit'), 160);
+}
+
+function logMon(s,d0,d1,hb){
+  monBuf.unshift({s,d0,d1,hb}); if(monBuf.length>400) monBuf.pop(); renderMon();
+}
+function renderMon(){
+  const hide=document.getElementById('hbFilter').checked;
+  const mon=document.getElementById('mon');
+  mon.innerHTML = monBuf.filter(m=>!(hide&&m.hb)).slice(0,120).map(m=>{
+    const t=(m.s&0xF0)===0xB0?'CC':(m.s&0xF0)===0x90?'NoteOn':(m.s&0xF0)===0x80?'NoteOff':(m.s&0xF0)===0xE0?'Pitch':'0x'+m.s.toString(16);
+    return `<div class="row${m.hb?' hb':''}"><b>${hex(m.s)}</b> ${hex(m.d0)} ${hex(m.d1)} <span>${t}</span></div>`;
+  }).join('');
+}
+const hex=n=>(n==null?'--':n.toString(16).padStart(2,'0'));
+
+// ---------- mapping ----------
+function markMapped(id){
+  const el=deck.querySelector(`[data-id="${id}"]`); if(!el)return;
+  if(map[id]) el.classList.add('mapped'); else el.classList.remove('mapped');
+}
+function updateMappedCount(){ document.getElementById('sMapped').textContent=Object.keys(map).length; }
+function toggleLearn(){ learn=!learn; const b=document.getElementById('learnBtn');
+  b.textContent='Learn mode: '+(learn?'ON — click a control':'off'); b.classList.toggle('armed',learn);
+  if(!learn){armed=null; document.querySelectorAll('.armed').forEach(e=>e.classList.remove('armed'));}}
+function clearMap(){ if(!confirm('Clear all learned mappings?'))return; map={...DEFAULT_MAP}; saveMap();
+  CONTROLS.forEach(c=>markMapped(c.id)); updateMappedCount(); }
+function loadMap(){ try{const m=JSON.parse(localStorage.getItem('openv7map')); return m||{...DEFAULT_MAP};}catch(e){return {...DEFAULT_MAP};} }
+function saveMap(){ localStorage.setItem('openv7map', JSON.stringify(map)); updateMappedCount(); }
+function exportMap(){
+  const lines = Object.entries(map).map(([id,m])=>{
+    const val = (m.status&0xF0)===0xE0 ? `0x${hex(m.status)}` : `0x${hex(m.status)} 0x${hex(m.d0)}`;
+    return `  <map value="${val}" name="${id}" />`;
+  });
+  const xml = `<!-- OpenV7 learned mapping -->\n<device name="Numark V7" author="OpenV7" type="MIDI" decks="1">\n${lines.join('\n')}\n</device>\n`;
+  const blob = new Blob([xml],{type:'text/xml'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='Numark_V7.learned.xml'; a.click();
+  navigator.clipboard && navigator.clipboard.writeText(JSON.stringify(map,null,2));
+  alert('Downloaded VirtualDJ mapping snippet.\nRaw JSON copied to clipboard too — paste it back to update docs/PROTOCOL.md.');
+}
+
+// ---------- calibration ----------
+const CAL = [
+  'Unplug the USB cable and make sure the V7 is powered OFF.',
+  'Hold the RIGHT deck HOT CUE buttons 1 and 3, then turn the power ON. They flash twice to confirm calibration mode.',
+  'Wait 10–20 seconds for the unit to initialize.',
+  'Set every fader and knob to MAXIMUM / far right, and the pitch fader to the BOTTOM. Press LEFT deck HOT CUE 1 when it lights.',
+  'Set every fader and knob to MINIMUM / far left, and the pitch fader to the TOP. Press LEFT deck HOT CUE 1 when it lights.',
+  'Left strip search: touch the far-right, then far-left, then center — press HOT CUE 1 at each position.',
+  'Right strip search: repeat the far-right / far-left / center touches, pressing HOT CUE 1 at each.',
+  'Set all controls to the MIDDLE position. Press LEFT deck HOT CUE 1.',
+  'Left deck HOT CUE 1–5 flash — calibration is complete.',
+  'Power-cycle the unit before reconnecting USB. Then reconnect and verify in the Tester tab.',
+];
+const calOl=document.getElementById('calSteps');
+CAL.forEach(t=>{ const li=document.createElement('li'); li.textContent=t; li.onclick=()=>li.classList.toggle('done'); calOl.appendChild(li); });
+
+function showTab(t){
+  document.getElementById('test').classList.toggle('hidden',t!=='test');
+  document.getElementById('cal').classList.toggle('hidden',t!=='cal');
+  document.getElementById('tabTest').classList.toggle('active',t==='test');
+  document.getElementById('tabCal').classList.toggle('active',t==='cal');
+}
+
+updateMappedCount();
+initMIDI();
+</script>
+</body>
+</html>

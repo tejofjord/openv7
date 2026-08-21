@@ -32,6 +32,8 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 [ -f app/AppIcon.icns ] || ./tools/build-icon.sh
 cp app/Info.plist       "$APP/Contents/Info.plist"
 cp app/AppIcon.icns     "$APP/Contents/Resources/AppIcon.icns"
+mkdir -p "$APP/Contents/Resources/tester"
+cp tester/index.html    "$APP/Contents/Resources/tester/index.html"
 cp "$BUILD/OpenV7"       "$APP/Contents/MacOS/OpenV7"
 cp "$BUILD/openv7-bridge" "$APP/Contents/MacOS/openv7-bridge"
 chmod +x "$APP/Contents/MacOS/"*
