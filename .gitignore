@@ -1,0 +1,12 @@
+# build output
+/openv7
+*.o
+*.dSYM/
+
+# macOS
+.DS_Store
+
+# editors
+.vscode/
+.idea/
+*.swp

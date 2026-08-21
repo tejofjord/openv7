@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Numark V7 — VirtualDJ device definition (STARTER)  ·  via OpenV7
+
+  Use with the OpenV7 userspace bridge running (the V7 appears as the MIDI
+  device "Numark V7"). This file maps the controls verified from captured USB
+  traffic and leaves the rest as TODO placeholders to confirm with MIDI-learn.
+
+  The button/pad message numbers below are NOT yet confirmed on hardware —
+  run `openv7 -v`, press each control, and fill in the real values, then send
+  a PR. See ../../docs/PROTOCOL.md. If the schema needs tweaking for your
+  VirtualDJ version, prefer MIDI-learn (see README.md) and update this file.
+-->
+<device name="Numark V7" author="OpenV7" type="MIDI" decks="1"
+        description="Numark V7 motorized controller via the OpenV7 userspace bridge">
+
+  <!-- ================= VERIFIED (captured on hardware) ================= -->
+
+  <!-- Motorized platter: 7-bit wrapping position counter, 3600 ticks/rev.
+       Deck A = CC 0x00, deck B = CC 0x02, paired with a 0xE0 pitch-bend
+       "timestamp" for velocity (clock 2,822,400 Hz). -->
+  <map value="0xB0 0x00" name="jog"  />
+  <map value="0xE0 0x00" name="jog_touch" />   <!-- TODO: refine pitch-bend timestamp handling -->
+
+  <!-- ============= TODO — confirm with `openv7 -v` + MIDI-learn ============= -->
+  <!-- Replace 0xNN with the real note/CC numbers each control emits. -->
+  <!-- <map value="0x90 0xNN" name="play"          /> -->
+  <!-- <map value="0x90 0xNN" name="cue"           /> -->
+  <!-- <map value="0x90 0xNN" name="sync"          /> -->
+  <!-- <map value="0x90 0xNN" name="deck_select"   /> -->
+  <!-- <map value="0xB0 0xNN" name="pitch"         /> --><!-- 100 mm pitch fader -->
+  <!-- <map value="0xB0 0xNN" name="strip_search"  /> --><!-- needle strip -->
+  <!-- <map value="0x90 0xNN" name="pad_1"         /> --><!-- hot cues 1-5 -->
+  <!-- <map value="0xB0 0xNN" name="browser_scroll"/> --><!-- library knob -->
+
+  <!-- ================= OUTPUT (host -> device) ================= -->
+  <!-- Motor + LEDs are driven by sending MIDI to the "Numark V7" destination.
+       Motor command set (deck A, status 0xB0), verified spins the platter:
+         0x43 = soft start   0x44 = brake    0x41 = instant start
+         0x45 = RPM (00=33, 01=45)           0x46 = direction (00 fwd / 01 rev)
+       See docs/PROTOCOL.md for the full set. Output mappings are next. -->
+
+</device>
