@@ -5,13 +5,16 @@
 - [x] Control-IN → CoreMIDI virtual source
 - [x] CoreMIDI virtual destination → control-OUT (LEDs, motor)
 - [x] VirtualDJ starter mapping
-- [ ] Confirm the full per-control MIDI map on hardware (run `openv7 --learn` and
-      operate each control, or `tools/win/midi-learn.ps1` on Windows)
+- [x] Document the full per-control map — see [CONTROL-MAP.md](CONTROL-MAP.md)
+- [ ] Confirm the cross-referenced rows on hardware (`openv7 --learn`, or
+      `tools/win/midi-learn.ps1` / `led-probe.ps1` on Windows). The platter and
+      motor set are already measured; the buttons, pads, faders and LEDs are not.
 - [x] Confirm platter reverse — `B0 46 01`, latched while stopped (PROTOCOL.md)
 - [x] Confirm the whole motor command set incl. ramp times and pitch-trim law
 
 ## v1.x — polish
-- [ ] LED feedback mapping (VU meters, pad/button lights)
+- [x] LED address map documented ([CONTROL-MAP.md](CONTROL-MAP.md)); still to
+      be confirmed on hardware with `tools/win/led-probe.ps1`
 - [ ] Motor "follow playback" via the `B0 49/69` pitch-trim, driven from the
       DJ app's playhead where available
 - [ ] `launchd` plist so the bridge auto-starts on device plug-in
