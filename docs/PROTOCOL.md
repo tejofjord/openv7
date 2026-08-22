@@ -219,14 +219,16 @@ Byte 2 of the firmware response (step 1) is a decimal-encoded version:
 - ✅ **Input** example: platter motion → `B0 00 vv` (deck A, CC `0x00`) /
   `B0 02 vv` (deck B, CC `0x02`), a wrapping 7-bit position counter, paired
   1:1 with a `0xE0` pitch-bend timestamp for velocity.
-- ⚠️ `B0 7D xx` / `B0 6E xx` were previously recorded here as an idle
-  heartbeat. **They are state reports, not chatter.** `B0 7D` carries the
-  deck-select position (`00` = A, `01` = B) and fires the instant the switch
-  moves; `B0 6E` was observed arriving in the same instant, paired with it.
-  Under the vendor driver there is no idle heartbeat at all: in a 45-second
-  hands-off window the capture shows *zero* packets on bulk IN `0x83` (see the
-  keepalive section below). The device is completely silent when nothing is
-  being touched.
+- ✅ **There is no heartbeat.** `B0 7D` / `B0 6E` were previously recorded here
+  as idle chatter. They are **state reports**: `B0 7D` carries the deck-select
+  position (`00` = A, `01` = B) and fires the instant the switch moves, with
+  `B0 6E` observed arriving paired with it.
+
+  Tested directly — **10 minutes of untouched idle produced exactly zero
+  messages**, and a 45-second USB-level capture shows zero packets on bulk IN
+  `0x83`. The device says nothing at all unless a control moves or the host
+  asks. Any liveness check built on expecting periodic input from the V7 will
+  wait forever.
 
   That does not mean the earlier macOS observation was imagined — OpenV7 does
   two things the vendor driver never does (a 25 ms `0xFD` frame on `0x04` and a
