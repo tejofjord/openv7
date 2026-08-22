@@ -33,7 +33,8 @@ No kernel extension. No system modification. Just a program you run.
 | Control **input** (jog, buttons, faders → MIDI) | ✅ working |
 | Control **output** (LEDs, **motor** → device) | ✅ working (motor spins on command) |
 | **Audio** (the V7's built-in 4-out soundcard) | ⏳ not yet — use any other audio output in your DJ app |
-| Reverse-direction / full per-control map | 🔬 being verified — see [docs/PROTOCOL.md](docs/PROTOCOL.md) |
+| **Motor** command set (start/stop/brake/RPM/**reverse**/ramp/pitch-trim) | ✅ measured on hardware — [docs/PROTOCOL.md](docs/PROTOCOL.md) |
+| Full per-control map (buttons, pads, faders, LEDs) | ✅ documented, 🔬 confirmation pending — [docs/CONTROL-MAP.md](docs/CONTROL-MAP.md) |
 
 > **v1 is control-only.** The V7's motor, jog, and buttons work in your DJ app;
 > for sound, point the app's audio output at your Mac's built-in output or any
@@ -144,8 +145,18 @@ The V7 exposes two vendor-specific USB interfaces. OpenV7:
    forwards the resulting MIDI to a CoreMIDI source.
 4. Frames MIDI from apps back into the **control-OUT** bulk endpoint (LEDs, motor).
 
-Full protocol details, endpoint map, and the motor command set are in
-[docs/PROTOCOL.md](docs/PROTOCOL.md).
+### Documentation
+
+| Doc | Covers |
+|---|---|
+| [docs/PROTOCOL.md](docs/PROTOCOL.md) | USB identity, endpoints, init handshake, platter reporting, the full motor command set, SysEx device identity |
+| [docs/CONTROL-MAP.md](docs/CONTROL-MAP.md) | Every control in and every LED/motor command out, with per-row confidence |
+| [docs/AUDIO-CODEC.md](docs/AUDIO-CODEC.md) | The Ploytec bit-interleaved format, packet framing, and why MIDI lives inside the audio packets |
+| [docs/VENDOR-DRIVER.md](docs/VENDOR-DRIVER.md) | Static analysis of the stock Windows driver — the keepalive and recovery mechanisms |
+| [docs/ROADMAP.md](docs/ROADMAP.md) | What is left |
+
+`tools/win/` holds the Windows reverse-engineering harness used to measure the
+motor set (see [docs/CONTROL-MAP.md](docs/CONTROL-MAP.md) for how to run it).
 
 ## Credits
 
