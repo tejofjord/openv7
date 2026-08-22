@@ -244,9 +244,30 @@ and the pitch-trim law — are in [PROTOCOL.md](PROTOCOL.md).
 
 ---
 
-## Why the 🔬 rows are still 🔬
+## Confirmation status: 84 of 89 inputs measured
 
-Every non-contact avenue for confirming these has been tried and failed:
+The input addresses below were checked against the hardware by operating the
+panel and recording what arrived (`tools/win/midi-observe.ps1`). **84 of the 89
+documented addresses appeared**, and — worth noting — the device emitted
+**nothing outside the documented set**, so the cross-referenced map contains no
+phantom entries.
+
+Five have not been seen:
+
+| Address | Control | Note |
+|---|---|---|
+| `90 12` | SHIFT A | SHIFT B (`0x33`) confirmed, so the control exists |
+| `90 53` | FX SELECT A | FX ON A (`0x52`) confirmed |
+| `90 7D` | DECK SELECT R | |
+| `B0 56` | FX parameter | the `0x58` variant is confirmed |
+| `90 42` | MOTOR ON/OFF B | needs the A/B switch in the B position |
+
+These are almost certainly correct but simply were not pressed; none of them is
+contradicted by anything observed.
+
+## Why the LED labels are still 🔬
+
+Every non-contact avenue for confirming the LED labels has been tried and failed:
 
 - **A control-state dump at init.** Many controllers report the position of
   every fader and knob when the driver attaches. Captured a full driver
