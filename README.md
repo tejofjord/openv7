@@ -32,9 +32,29 @@ No kernel extension. No system modification. Just a program you run.
 |------------|-------|
 | Control **input** (jog, buttons, faders → MIDI) | ✅ working |
 | Control **output** (LEDs, **motor** → device) | ✅ working (motor spins on command) |
-| **Audio** (the V7's built-in 4-out soundcard) | ⏳ not yet — use any other audio output in your DJ app |
+| **Audio** (the V7's built-in soundcard) | ⏳ not implemented — but the wire format is now known, see below |
 | **Motor** command set (start/stop/brake/RPM/**reverse**/ramp/pitch-trim) | ✅ measured on hardware — [docs/PROTOCOL.md](docs/PROTOCOL.md) |
-| Full per-control map (buttons, pads, faders, LEDs) | ✅ documented, 🔬 confirmation pending — [docs/CONTROL-MAP.md](docs/CONTROL-MAP.md) |
+| Full per-control map (buttons, pads, faders, LEDs) | ✅ mapped, 🔬 hardware confirmation pending — [docs/CONTROL-MAP.md](docs/CONTROL-MAP.md) |
+
+### Protocol coverage
+
+The USB protocol is fully documented. Every area is either measured on this
+hardware (✅) or mapped from a corroborating source and flagged as unconfirmed
+(🔬):
+
+| Area | |
+|---|---|
+| Endpoints, roles and exact data rates | ✅ measured to 0.02 % |
+| Init handshake, incl. what the status bits mean | ✅ measured & decoded |
+| Device identity + serial (SysEx inquiry) | ✅ measured |
+| Control frame format, both directions | ✅ measured |
+| Platter encoder (3600 counts/rev) and timestamp clock | ✅ measured |
+| Motor command set (all 9, incl. reverse and pitch-trim law) | ✅ measured |
+| Idle keepalive behaviour | ✅ measured — **there is none** |
+| Recovery sequence | ✅ measured — abort pipes + `SET_CONFIGURATION` |
+| Audio **output** encoding | ✅ decoded — plain 24-bit LE, **no codec needed** |
+| Audio **input** frame layout | 🔬 mapped (bit-scatter, 1 bit/byte) |
+| 89 control inputs / ~60 LED outputs | 🔬 mapped |
 
 > **v1 is control-only.** The V7's motor, jog, and buttons work in your DJ app;
 > for sound, point the app's audio output at your Mac's built-in output or any
