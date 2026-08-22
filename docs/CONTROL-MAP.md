@@ -184,9 +184,18 @@ Every non-contact avenue for confirming these has been tried and failed:
   re-init: the V7 sends **nothing** on bulk IN `0x83` afterwards.
 - **An idle heartbeat to piggyback on.** There is none — 45 seconds of
   hands-off capture contains zero `0x83` packets.
-- **A query/response channel.** Sweeping every CC and note-on across
-  `0x00`–`0x7F` produced no reply; the only request/response path on the device
-  is the SysEx identity inquiry, which returns a fixed string.
+- **A query/response channel.** Ruled out twice. Sweeping every CC and note-on
+  across `0x00`–`0x7F` through the MIDI port drew no reply, and repeating the
+  sweep **at the raw USB level** (below the vendor driver's MIDI filtering,
+  `tools/win/capture-sweep.ps1`) confirms it: 996 outbound packets on bulk OUT
+  `0x04`, and endpoint `0x83` produced **no inbound packets at all** — it does
+  not even appear in the capture's endpoint totals. The only request/response
+  path on the device is the SysEx identity inquiry, which returns a fixed
+  string.
+
+  So the V7 is strictly **write-only for LEDs and read-only for controls**.
+  There is no way to interrogate an LED's state or a control's position; the
+  device volunteers a control's value only when it physically moves.
 - **A second independent published mapping** to corroborate the Mixxx
   addresses. None exists publicly for the V7.
 
