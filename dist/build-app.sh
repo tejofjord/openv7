@@ -16,8 +16,8 @@ LIBUSB_A="$LIBUSB_PREFIX/lib/libusb-1.0.a"
 echo "==> building self-contained bridge (static libusb)"
 clang -O2 -std=c11 -Wall -Wno-deprecated-declarations \
   -I"$LIBUSB_PREFIX/include/libusb-1.0" \
-  src/main.c "$LIBUSB_A" \
-  -framework CoreMIDI -framework CoreFoundation -framework IOKit -framework Security \
+  src/main.c src/nonap.m "$LIBUSB_A" \
+  -framework CoreMIDI -framework CoreFoundation -framework Foundation -framework IOKit -framework Security \
   -o "$BUILD/openv7-bridge"
 
 echo "==> building menu-bar app"

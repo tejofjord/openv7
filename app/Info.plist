@@ -12,6 +12,7 @@
     <key>CFBundleVersion</key>           <string>1</string>
     <key>LSMinimumSystemVersion</key>    <string>13.0</string>
     <key>LSUIElement</key>               <true/>
+    <key>NSAppSleepDisabled</key>        <true/>
     <key>CFBundleIconFile</key>          <string>AppIcon</string>
     <key>NSHumanReadableCopyright</key>  <string>MIT — OpenV7 contributors</string>
 </dict>

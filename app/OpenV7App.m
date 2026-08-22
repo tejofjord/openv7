@@ -34,6 +34,9 @@ static NSColor *HEX(int r,int g,int b,double a){ return [NSColor colorWithSRGBRe
 @property (assign) BOOL learn;
 @property (weak) V7Control *armed;
 @property (weak) id<DeviceViewDelegate> delegate;
+@property (assign) double platterAngle;        // accumulated rotation (radians)
+@property (assign) int    platterPos;          // last encoder position (0..127), -1 = none
+@property (assign) CFTimeInterval platterSpinUntil;   // "actively spinning" deadline
 @end
 
 @implementation DeviceView
@@ -42,31 +45,49 @@ static NSColor *HEX(int r,int g,int b,double a){ return [NSColor colorWithSRGBRe
 - (instancetype)initWithFrame:(NSRect)f {
     if ((self = [super initWithFrame:f])) {
         _controls = [NSMutableArray array];
-        // id, label, x,y,w,h, kind
+        // id, label, x,y,w,h, kind  — coords are 0..1 of the panel, y from TOP
+        // (isFlipped). Laid out to match the real single-deck Numark V7 panel.
         NSArray *L = @[
-          @[@"browse",@"BROWSE",@.78,@.05,@.16,@.09,@"knob"],
-          @[@"load",@"LOAD",@.78,@.16,@.16,@.06,@""],
-          @[@"platter",@"",@.22,@.08,@.52,@.46,@"platter"],
-          @[@"strip",@"STRIP SEARCH",@.22,@.56,@.52,@.05,@"strip"],
-          @[@"pitch",@"PITCH",@.885,@.26,@.075,@.34,@"fader"],
-          @[@"keylock",@"KEYLK",@.78,@.26,@.09,@.06,@""],
-          @[@"range",@"RANGE",@.78,@.34,@.09,@.06,@""],
-          @[@"reverse",@"BLEEP",@.05,@.26,@.13,@.08,@""],
-          @[@"slip",@"SLIP",@.05,@.36,@.13,@.06,@""],
-          @[@"sync",@"SYNC",@.05,@.44,@.13,@.06,@""],
-          @[@"deck",@"DECK",@.05,@.52,@.13,@.06,@""],
-          @[@"cue",@"CUE",@.24,@.64,@.15,@.09,@"big"],
-          @[@"play",@"PLAY",@.41,@.64,@.15,@.09,@"big"],
-          @[@"loopin",@"LOOP IN",@.60,@.64,@.12,@.06,@""],
-          @[@"loopout",@"LOOP OUT",@.60,@.71,@.12,@.06,@""],
-          @[@"autoloop",@"AUTO",@.74,@.64,@.12,@.13,@"knob"],
-          @[@"pad1",@"1",@.05,@.80,@.10,@.09,@"pad"],
-          @[@"pad2",@"2",@.17,@.80,@.10,@.09,@"pad"],
-          @[@"pad3",@"3",@.29,@.80,@.10,@.09,@"pad"],
-          @[@"pad4",@"4",@.41,@.80,@.10,@.09,@"pad"],
-          @[@"pad5",@"5",@.53,@.80,@.10,@.09,@"pad"],
-          @[@"delete",@"DELETE",@.65,@.80,@.12,@.09,@""],
-          @[@"fxon",@"FX ON",@.79,@.80,@.15,@.09,@""],
+          // --- top row: strip search + browse encoder ---
+          @[@"strip",  @"STRIP SEARCH",@.30,@.025,@.30,@.030,@"strip"],
+          @[@"browse", @"BROWSE",      @.82,@.03, @.12,@.11, @"knob"],
+          // --- top-left: loop controls ---
+          @[@"loop",   @"LOOP",        @.055,@.075,@.095,@.045,@""],
+          @[@"loopin", @"IN",          @.055,@.128,@.060,@.045,@""],
+          @[@"loopout",@"OUT",         @.120,@.128,@.060,@.045,@""],
+          @[@"loopsel",@"SELECT",      @.185,@.128,@.065,@.045,@""],
+          @[@"reloop", @"RELOOP",      @.255,@.128,@.070,@.045,@""],
+          // --- top-right: back/fwd + load A/B ---
+          @[@"back",   @"BACK",        @.62, @.075,@.085,@.045,@""],
+          @[@"fwd",    @"FWD",         @.715,@.075,@.085,@.045,@""],
+          @[@"loada",  @"LOAD A",      @.62, @.128,@.085,@.045,@""],
+          @[@"loadb",  @"LOAD B",      @.715,@.128,@.085,@.045,@""],
+          // --- left column ---
+          @[@"motor",  @"MOTOR",       @.05, @.225,@.13, @.055,@""],
+          @[@"sleep",  @"SLEEP",       @.05, @.290,@.13, @.050,@""],
+          @[@"reverse",@"REVERSE",     @.05, @.348,@.13, @.050,@""],
+          @[@"censor", @"CENSOR",      @.05, @.406,@.13, @.050,@""],
+          @[@"fxsel",  @"FX SEL",      @.055,@.485,@.11, @.09, @"knob"],
+          @[@"fxparam",@"FX PARAM",    @.065,@.620,@.09, @.16, @"fader"],
+          @[@"fxon",   @"FX ON",       @.05, @.885,@.13, @.055,@""],
+          // --- center: platter ---
+          @[@"platter",@"",            @.275,@.185,@.45, @.45, @"platter"],
+          // --- right column: master/range + pitch fader + bend ---
+          @[@"master", @"MASTER",      @.80, @.235,@.12, @.048,@""],
+          @[@"tempo",  @"TEMPO",       @.80, @.293,@.12, @.048,@""],
+          @[@"range",  @"RANGE",       @.80, @.351,@.12, @.048,@""],
+          @[@"pitch",  @"PITCH",       @.865,@.44, @.075,@.30, @"fader"],
+          @[@"bendm",  @"BEND −",      @.775,@.795,@.085,@.05, @""],
+          @[@"bendp",  @"BEND +",      @.865,@.795,@.085,@.05, @""],
+          // --- bottom-center: hot-cue pads + transport ---
+          @[@"pad1",   @"1",           @.285,@.675,@.075,@.06, @"pad"],
+          @[@"pad2",   @"2",           @.365,@.675,@.075,@.06, @"pad"],
+          @[@"pad3",   @"3",           @.445,@.675,@.075,@.06, @"pad"],
+          @[@"pad4",   @"4",           @.525,@.675,@.075,@.06, @"pad"],
+          @[@"pad5",   @"5",           @.605,@.675,@.075,@.06, @"pad"],
+          @[@"sync",   @"SYNC",        @.295,@.78, @.12, @.09, @"big"],
+          @[@"cue",    @"CUE",         @.435,@.78, @.12, @.09, @"big"],
+          @[@"play",   @"PLAY",        @.575,@.78, @.12, @.09, @"big"],
         ];
         for (NSArray *a in L) {
             V7Control *c = [V7Control new];
@@ -76,6 +97,7 @@ static NSColor *HEX(int r,int g,int b,double a){ return [NSColor colorWithSRGBRe
             [_controls addObject:c];
         }
         [self loadMap];
+        _platterPos = -1;
     }
     return self;
 }
@@ -96,6 +118,15 @@ static NSColor *HEX(int r,int g,int b,double a){ return [NSColor colorWithSRGBRe
     V7Control *c=[self controlForStatus:s d0:d0]; if(!c) return;
     c.hitUntil = CFAbsoluteTimeGetCurrent()+0.18;
     if ([c.kind isEqual:@"fader"]||[c.kind isEqual:@"strip"]) c.lastVal=d1;
+    if ([c.kind isEqual:@"platter"]) {
+        if (_platterPos >= 0) {
+            int delta = (int)d1 - _platterPos;        // signed shortest path on the 0..127 ring
+            if (delta > 64) delta -= 128; else if (delta < -64) delta += 128;
+            _platterAngle -= delta * (2*M_PI/1024.0);  // ~1024 ticks per visual turn (tunable)
+        }
+        _platterPos = d1;
+        _platterSpinUntil = CFAbsoluteTimeGetCurrent() + 0.30;
+    }
     self.needsDisplay=YES;
 }
 
@@ -141,17 +172,34 @@ static NSColor *HEX(int r,int g,int b,double a){ return [NSColor colorWithSRGBRe
         NSColor *accent = HEX(47,139,255,1), *cyan=HEX(76,201,255,1), *hot=HEX(255,92,122,1);
 
         if ([c.kind isEqual:@"platter"]) {
+            CGFloat cx=NSMidX(r), cy=NSMidY(r), R=r.size.width/2;
+            BOOL spinning = (_platterSpinUntil > now);
+            // vinyl disc + concentric grooves (stationary)
             NSBezierPath *disc=[NSBezierPath bezierPathWithOvalInRect:r];
             NSGradient *vg=[[NSGradient alloc] initWithStartingColor:HEX(24,24,28,1) endingColor:HEX(8,8,11,1)];
             [vg drawInBezierPath:disc relativeCenterPosition:NSMakePoint(-0.25,0.25)];
             [HEX(60,66,80,0.5) setStroke];
             for(CGFloat f=0.92;f>0.4;f-=0.09){ NSRect rr=NSInsetRect(r,r.size.width*(1-f)/2,r.size.height*(1-f)/2);
                 NSBezierPath *ring=[NSBezierPath bezierPathWithOvalInRect:rr]; ring.lineWidth=1.5;[ring stroke]; }
+            // ---- rotating layer: radial spokes + center label spin with the encoder ----
+            [NSGraphicsContext saveGraphicsState];
+            NSAffineTransform *tr=[NSAffineTransform transform];
+            [tr translateXBy:cx yBy:cy]; [tr rotateByRadians:_platterAngle]; [tr translateXBy:-cx yBy:-cy]; [tr concat];
+            NSColor *spoke = spinning ? HEX(76,201,255,0.85) : HEX(90,100,120,0.5);
+            for(int i=0;i<8;i++){ double a=i*M_PI/4.0;
+                NSBezierPath *sp=[NSBezierPath bezierPath]; sp.lineWidth=(i==0?3.0:1.5);
+                [sp moveToPoint:NSMakePoint(cx+cos(a)*R*0.40, cy+sin(a)*R*0.40)];
+                [sp lineToPoint:NSMakePoint(cx+cos(a)*R*0.90, cy+sin(a)*R*0.90)];
+                if(i==0) [(spinning?HEX(255,92,122,1):HEX(150,90,100,1)) setStroke]; else [spoke setStroke];  // red index spoke
+                [sp stroke]; }
             NSRect lab=NSInsetRect(r,r.size.width*0.34,r.size.height*0.34);
             NSGradient *lg=[[NSGradient alloc] initWithStartingColor:HEX(47,139,255,1) endingColor:HEX(10,86,214,1)];
             [lg drawInBezierPath:[NSBezierPath bezierPathWithOvalInRect:lab] angle:-70];
-            [self label:@"V7" in:lab color:NSColor.whiteColor size:r.size.height*0.10];
-            if(glow>0){ [[cyan colorWithAlphaComponent:glow] setStroke]; NSBezierPath *g=[NSBezierPath bezierPathWithOvalInRect:NSInsetRect(r,-3,-3)]; g.lineWidth=4;[g stroke]; }
+            [self label:@"V7" in:lab color:NSColor.whiteColor size:r.size.height*0.11];
+            [NSGraphicsContext restoreGraphicsState];
+            // active-spin glow ring
+            if(spinning || glow>0){ CGFloat a=spinning?0.85:glow; [[cyan colorWithAlphaComponent:a] setStroke];
+                NSBezierPath *g=[NSBezierPath bezierPathWithOvalInRect:NSInsetRect(r,-3,-3)]; g.lineWidth=4;[g stroke]; }
             continue;
         }
         if ([c.kind isEqual:@"fader"]) {
@@ -223,6 +271,7 @@ static NSColor *HEX(int r,int g,int b,double a){ return [NSColor colorWithSRGBRe
 @property (assign) BOOL connected;
 @property (strong) NSTimer *timer2;
 @property (strong) NSTextField *midiStat;
+@property (strong) id activityToken;
 - (void)flushRx;
 @end
 
@@ -277,11 +326,18 @@ static void MIDIReadCB(const MIDIPacketList *pl, void *a, void *b) {
     if([self bridgeRunning]) return;
     NSString *path=[self bridgePath]; if(!path) return;
     NSTask *t=[NSTask new]; t.executableURL=[NSURL fileURLWithPath:path];
+    t.qualityOfService = NSQualityOfServiceUserInteractive;   /* keep the child un-throttled */
     t.standardOutput=[NSFileHandle fileHandleWithNullDevice];
-    t.standardError=[NSFileHandle fileHandleWithNullDevice];
+    /* keep the bridge's status lines (handshake, teardown) in a support log */
+    [[NSFileManager defaultManager] createFileAtPath:@"/tmp/openv7_bridge.log" contents:nil attributes:nil];
+    NSFileHandle *elog=[NSFileHandle fileHandleForWritingAtPath:@"/tmp/openv7_bridge.log"];
+    t.standardError = elog ?: [NSFileHandle fileHandleWithNullDevice];
     NSError *e=nil; if([t launchAndReturnError:&e]) _task=t;
+    _connected=NO;   // reconnect the tester to the freshly-published source
     [self refresh];
 }
+/* SIGTERM (not kill) so the bridge runs its graceful USB teardown, leaving the
+   device clean for the next launch. */
 - (void)stopBridge { if([self bridgeRunning]) [_task terminate]; _task=nil; }
 
 - (void)connectMIDI {
@@ -431,7 +487,7 @@ static void MIDIReadCB(const MIDIPacketList *pl, void *a, void *b) {
 
 // ---- menu bar ----
 - (void)tick {
-    if(![self bridgeRunning]) [self startBridge];
+    if(![self bridgeRunning]) [self startBridge];   // relaunch if it exited
     if(!_connected) [self connectMIDI];
     [self refresh];
 }
@@ -453,6 +509,10 @@ static void MIDIReadCB(const MIDIPacketList *pl, void *a, void *b) {
 
 - (void)applicationDidFinishLaunching:(NSNotification*)n {
     (void)n; gApp=self;
+    /* keep the app (and its bridge child) out of App Nap so the USB stream isn't throttled */
+    self.activityToken = [[NSProcessInfo processInfo]
+        beginActivityWithOptions:NSActivityUserInitiated|NSActivityLatencyCritical
+        reason:@"Streaming from the Numark V7"];
     _item=[[NSStatusBar systemStatusBar] statusItemWithLength:NSVariableStatusItemLength];
     _item.button.title=@"○ V7";
     NSMenu *m=[NSMenu new];
@@ -472,7 +532,6 @@ static void MIDIReadCB(const MIDIPacketList *pl, void *a, void *b) {
     [self startBridge];
     _timer=[NSTimer scheduledTimerWithTimeInterval:3.0 target:self selector:@selector(tick) userInfo:nil repeats:YES];
     [self refresh];
-    if(getenv("OPENV7_OPEN_TESTER")) [self openTester:nil];   // test hook
 }
 - (void)applicationWillTerminate:(NSNotification*)n { (void)n; [self stopBridge]; }
 @end

@@ -1,6 +1,6 @@
 # OpenV7 — Numark V7 userspace driver (Apple-Silicon macOS)
 BIN      := openv7
-SRC      := src/main.c
+SRC      := src/main.c src/nonap.m
 PREFIX   ?= /usr/local
 
 CC       ?= clang
@@ -10,7 +10,7 @@ CFLAGS   += $(shell pkg-config --cflags libusb-1.0)
 # silence the warnings for v1.
 CFLAGS   += -Wno-deprecated-declarations
 LDFLAGS  += $(shell pkg-config --libs libusb-1.0)
-LDFLAGS  += -framework CoreMIDI -framework CoreFoundation
+LDFLAGS  += -framework CoreMIDI -framework CoreFoundation -framework Foundation
 
 .PHONY: all clean install uninstall app
 all: $(BIN)
