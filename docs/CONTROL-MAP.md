@@ -140,6 +140,49 @@ Deck B = deck A + `0x16`. Values are `0x00` = off, `0x01` = on unless noted.
 | `0x37` | `0x38` | **Pitch-at-zero indicator** — verified *not* a motor command ✅ | ✅/🔬 |
 | `0x3C` | `0x3D` | FX button | 🔬 |
 
+### ✅ LED addresses located on the panel by camera
+
+The device has no LED feedback channel, so the only way to see which command
+drives which lamp is to look. `tools/win/led-cam-probe.ps1` automates that: it
+photographs the panel, sends one CC, photographs again, and finds the brightest
+changed cluster. **44 CCs were confirmed to drive a real lamp**, and their
+positions corroborate the addresses above:
+
+| Documented | Where the camera found it | |
+|---|---|---|
+| `0x07`/`0x08`/`0x09` — SYNC / CUE / PLAY A | column of 3, x≈378 | ✅ the transport column |
+| `0x0A`–`0x0F` — shift-layer LEDs (6) | column of 6, x≈442 | ✅ |
+| `0x13`–`0x1C` — loop block | cluster, top right | ✅ |
+| `0x03`/`0x04`/`0x05` — PREPARE / FILES / CRATES | vertical trio, x≈971 | ✅ |
+
+![LED map](img/v7-led-map.png)
+
+Each circle marks where that CC's lamp lit. Full coordinates are in
+`captures/v7-led-cam-final.json`.
+
+Two caveats on that data:
+
+- **27 of the 44 are strong hits** (≥60 changed pixels in the hotspot cell).
+  The other 17 — `0x01`, `0x02`, `0x06`, `0x10`, `0x12`, `0x1E`, `0x20`–`0x23`,
+  `0x2D`, `0x2E`, `0x34`, `0x59`, `0x6C`, `0x77`, `0x78` — are weak and some may
+  be artifacts.
+- **Several addresses share one location.** `0x01`/`0x02`/`0x06` all light
+  (703,124), and `0x1E`/`0x20`–`0x23` all light (1063,299). That is the
+  signature of a multi-state indicator or display rather than separate lamps,
+  and matches the `0x34`/`0x35`/`0x36` group taking values 0–12.
+
+**LEDs appear to follow the A/B switch, like inputs do.** With the switch in one
+position the deck-A LED block (`0x07`–`0x1C`) lit almost completely, while the
+deck-B block (`0x1D`–`0x33`) largely did not respond.
+
+> Method note: this needs the camera, the deck and the lighting to stay still.
+> Two runs were silently ruined before a guard was added — the giveaway was
+> hotspots piling up at the frame edge with 25,000+ changed pixels, which is a
+> scene change, not a lamp. The probe now rejects such frames and says so.
+> Comparing a fresh off/on pair per CC, rather than one shared baseline, is what
+> made it robust: the laptop screen faces the deck and its own output changes
+> the light falling on the panel.
+
 Global / shared:
 
 | CC | Function | Confidence |

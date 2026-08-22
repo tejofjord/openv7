@@ -1,0 +1,442 @@
+﻿[
+    {
+        "CC":  1,
+        "Hex":  "0x01",
+        "CellPixels":  48,
+        "TotalPixels":  80,
+        "X":  703,
+        "Y":  124,
+        "Peak":  119,
+        "Shot":  "C:\\Users\\Michael\\dev\\openv7\\captures\\cam\\cc01.png"
+    },
+    {
+        "CC":  2,
+        "Hex":  "0x02",
+        "CellPixels":  48,
+        "TotalPixels":  106,
+        "X":  703,
+        "Y":  124,
+        "Peak":  123,
+        "Shot":  "C:\\Users\\Michael\\dev\\openv7\\captures\\cam\\cc02.png"
+    },
+    {
+        "CC":  3,
+        "Hex":  "0x03",
+        "CellPixels":  171,
+        "TotalPixels":  340,
+        "X":  971,
+        "Y":  565,
+        "Peak":  162,
+        "Shot":  "C:\\Users\\Michael\\dev\\openv7\\captures\\cam\\cc03.png"
+    },
+    {
+        "CC":  4,
+        "Hex":  "0x04",
+        "CellPixels":  153,
+        "TotalPixels":  275,
+        "X":  971,
+        "Y":  632,
+        "Peak":  146,
+        "Shot":  "C:\\Users\\Michael\\dev\\openv7\\captures\\cam\\cc04.png"
+    },
+    {
+        "CC":  5,
+        "Hex":  "0x05",
+        "CellPixels":  163,
+        "TotalPixels":  299,
+        "X":  972,
+        "Y":  513,
+        "Peak":  165,
+        "Shot":  "C:\\Users\\Michael\\dev\\openv7\\captures\\cam\\cc05.png"
+    },
+    {
+        "CC":  6,
+        "Hex":  "0x06",
+        "CellPixels":  46,
+        "TotalPixels":  110,
+        "X":  703,
+        "Y":  124,
+        "Peak":  119,
+        "Shot":  "C:\\Users\\Michael\\dev\\openv7\\captures\\cam\\cc06.png"
+    },
+    {
+        "CC":  7,
+        "Hex":  "0x07",
+        "CellPixels":  239,
+        "TotalPixels":  635,
+        "X":  377,
+        "Y":  249,
+        "Peak":  177,
+        "Shot":  "C:\\Users\\Michael\\dev\\openv7\\captures\\cam\\cc07.png"
+    },
+    {
+        "CC":  8,
+        "Hex":  "0x08",
+        "CellPixels":  220,
+        "TotalPixels":  538,
+        "X":  378,
+        "Y":  325,
+        "Peak":  178,
+        "Shot":  "C:\\Users\\Michael\\dev\\openv7\\captures\\cam\\cc08.png"
+    },
+    {
+        "CC":  9,
+        "Hex":  "0x09",
+        "CellPixels":  246,
+        "TotalPixels":  682,
+        "X":  378,
+        "Y":  419,
+        "Peak":  189,
+        "Shot":  "C:\\Users\\Michael\\dev\\openv7\\captures\\cam\\cc09.png"
+    },
+    {
+        "CC":  10,
+        "Hex":  "0x0A",
+        "CellPixels":  310,
+        "TotalPixels":  529,
+        "X":  439,
+        "Y":  179,
+        "Peak":  180,
+        "Shot":  "C:\\Users\\Michael\\dev\\openv7\\captures\\cam\\cc0A.png"
+    },
+    {
+        "CC":  11,
+        "Hex":  "0x0B",
+        "CellPixels":  64,
+        "TotalPixels":  184,
+        "X":  441,
+        "Y":  251,
+        "Peak":  165,
+        "Shot":  "C:\\Users\\Michael\\dev\\openv7\\captures\\cam\\cc0B.png"
+    },
+    {
+        "CC":  12,
+        "Hex":  "0x0C",
+        "CellPixels":  89,
+        "TotalPixels":  243,
+        "X":  442,
+        "Y":  307,
+        "Peak":  181,
+        "Shot":  "C:\\Users\\Michael\\dev\\openv7\\captures\\cam\\cc0C.png"
+    },
+    {
+        "CC":  13,
+        "Hex":  "0x0D",
+        "CellPixels":  114,
+        "TotalPixels":  183,
+        "X":  443,
+        "Y":  365,
+        "Peak":  177,
+        "Shot":  "C:\\Users\\Michael\\dev\\openv7\\captures\\cam\\cc0D.png"
+    },
+    {
+        "CC":  14,
+        "Hex":  "0x0E",
+        "CellPixels":  115,
+        "TotalPixels":  413,
+        "X":  443,
+        "Y":  422,
+        "Peak":  175,
+        "Shot":  "C:\\Users\\Michael\\dev\\openv7\\captures\\cam\\cc0E.png"
+    },
+    {
+        "CC":  15,
+        "Hex":  "0x0F",
+        "CellPixels":  72,
+        "TotalPixels":  394,
+        "X":  445,
+        "Y":  476,
+        "Peak":  177,
+        "Shot":  "C:\\Users\\Michael\\dev\\openv7\\captures\\cam\\cc0F.png"
+    },
+    {
+        "CC":  16,
+        "Hex":  "0x10",
+        "CellPixels":  50,
+        "TotalPixels":  349,
+        "X":  764,
+        "Y":  610,
+        "Peak":  203,
+        "Shot":  "C:\\Users\\Michael\\dev\\openv7\\captures\\cam\\cc10.png"
+    },
+    {
+        "CC":  17,
+        "Hex":  "0x11",
+        "CellPixels":  143,
+        "TotalPixels":  542,
+        "X":  725,
+        "Y":  17,
+        "Peak":  168,
+        "Shot":  "C:\\Users\\Michael\\dev\\openv7\\captures\\cam\\cc11.png"
+    },
+    {
+        "CC":  18,
+        "Hex":  "0x12",
+        "CellPixels":  56,
+        "TotalPixels":  675,
+        "X":  884,
+        "Y":  76,
+        "Peak":  186,
+        "Shot":  "C:\\Users\\Michael\\dev\\openv7\\captures\\cam\\cc12.png"
+    },
+    {
+        "CC":  19,
+        "Hex":  "0x13",
+        "CellPixels":  202,
+        "TotalPixels":  402,
+        "X":  954,
+        "Y":  12,
+        "Peak":  183,
+        "Shot":  "C:\\Users\\Michael\\dev\\openv7\\captures\\cam\\cc13.png"
+    },
+    {
+        "CC":  20,
+        "Hex":  "0x14",
+        "CellPixels":  75,
+        "TotalPixels":  357,
+        "X":  954,
+        "Y":  67,
+        "Peak":  188,
+        "Shot":  "C:\\Users\\Michael\\dev\\openv7\\captures\\cam\\cc14.png"
+    },
+    {
+        "CC":  21,
+        "Hex":  "0x15",
+        "CellPixels":  282,
+        "TotalPixels":  708,
+        "X":  1043,
+        "Y":  36,
+        "Peak":  200,
+        "Shot":  "C:\\Users\\Michael\\dev\\openv7\\captures\\cam\\cc15.png"
+    },
+    {
+        "CC":  22,
+        "Hex":  "0x16",
+        "CellPixels":  83,
+        "TotalPixels":  816,
+        "X":  954,
+        "Y":  130,
+        "Peak":  196,
+        "Shot":  "C:\\Users\\Michael\\dev\\openv7\\captures\\cam\\cc16.png"
+    },
+    {
+        "CC":  23,
+        "Hex":  "0x17",
+        "CellPixels":  75,
+        "TotalPixels":  659,
+        "X":  954,
+        "Y":  186,
+        "Peak":  188,
+        "Shot":  "C:\\Users\\Michael\\dev\\openv7\\captures\\cam\\cc17.png"
+    },
+    {
+        "CC":  24,
+        "Hex":  "0x18",
+        "CellPixels":  217,
+        "TotalPixels":  773,
+        "X":  1043,
+        "Y":  158,
+        "Peak":  187,
+        "Shot":  "C:\\Users\\Michael\\dev\\openv7\\captures\\cam\\cc18.png"
+    },
+    {
+        "CC":  25,
+        "Hex":  "0x19",
+        "CellPixels":  127,
+        "TotalPixels":  729,
+        "X":  999,
+        "Y":  13,
+        "Peak":  187,
+        "Shot":  "C:\\Users\\Michael\\dev\\openv7\\captures\\cam\\cc19.png"
+    },
+    {
+        "CC":  26,
+        "Hex":  "0x1A",
+        "CellPixels":  77,
+        "TotalPixels":  1224,
+        "X":  997,
+        "Y":  76,
+        "Peak":  179,
+        "Shot":  "C:\\Users\\Michael\\dev\\openv7\\captures\\cam\\cc1A.png"
+    },
+    {
+        "CC":  27,
+        "Hex":  "0x1B",
+        "CellPixels":  136,
+        "TotalPixels":  2678,
+        "X":  997,
+        "Y":  130,
+        "Peak":  186,
+        "Shot":  "C:\\Users\\Michael\\dev\\openv7\\captures\\cam\\cc1B.png"
+    },
+    {
+        "CC":  28,
+        "Hex":  "0x1C",
+        "CellPixels":  112,
+        "TotalPixels":  1788,
+        "X":  997,
+        "Y":  186,
+        "Peak":  182,
+        "Shot":  "C:\\Users\\Michael\\dev\\openv7\\captures\\cam\\cc1C.png"
+    },
+    {
+        "CC":  30,
+        "Hex":  "0x1E",
+        "CellPixels":  30,
+        "TotalPixels":  1081,
+        "X":  1062,
+        "Y":  299,
+        "Peak":  152,
+        "Shot":  "C:\\Users\\Michael\\dev\\openv7\\captures\\cam\\cc1E.png"
+    },
+    {
+        "CC":  32,
+        "Hex":  "0x20",
+        "CellPixels":  31,
+        "TotalPixels":  1298,
+        "X":  1063,
+        "Y":  298,
+        "Peak":  126,
+        "Shot":  "C:\\Users\\Michael\\dev\\openv7\\captures\\cam\\cc20.png"
+    },
+    {
+        "CC":  33,
+        "Hex":  "0x21",
+        "CellPixels":  38,
+        "TotalPixels":  1810,
+        "X":  1063,
+        "Y":  299,
+        "Peak":  139,
+        "Shot":  "C:\\Users\\Michael\\dev\\openv7\\captures\\cam\\cc21.png"
+    },
+    {
+        "CC":  34,
+        "Hex":  "0x22",
+        "CellPixels":  49,
+        "TotalPixels":  2406,
+        "X":  1063,
+        "Y":  300,
+        "Peak":  146,
+        "Shot":  "C:\\Users\\Michael\\dev\\openv7\\captures\\cam\\cc22.png"
+    },
+    {
+        "CC":  35,
+        "Hex":  "0x23",
+        "CellPixels":  52,
+        "TotalPixels":  3067,
+        "X":  1063,
+        "Y":  299,
+        "Peak":  135,
+        "Shot":  "C:\\Users\\Michael\\dev\\openv7\\captures\\cam\\cc23.png"
+    },
+    {
+        "CC":  45,
+        "Hex":  "0x2D",
+        "CellPixels":  31,
+        "TotalPixels":  2237,
+        "X":  975,
+        "Y":  566,
+        "Peak":  114,
+        "Shot":  "C:\\Users\\Michael\\dev\\openv7\\captures\\pass2\\cam\\cc2D.png"
+    },
+    {
+        "CC":  46,
+        "Hex":  "0x2E",
+        "CellPixels":  25,
+        "TotalPixels":  891,
+        "X":  1064,
+        "Y":  299,
+        "Peak":  129,
+        "Shot":  "C:\\Users\\Michael\\dev\\openv7\\captures\\pass2\\cam\\cc2E.png"
+    },
+    {
+        "CC":  52,
+        "Hex":  "0x34",
+        "CellPixels":  55,
+        "TotalPixels":  149,
+        "X":  602,
+        "Y":  12,
+        "Peak":  96,
+        "Shot":  "C:\\Users\\Michael\\dev\\openv7\\captures\\pass2\\cam\\cc34.png"
+    },
+    {
+        "CC":  55,
+        "Hex":  "0x37",
+        "CellPixels":  249,
+        "TotalPixels":  834,
+        "X":  560,
+        "Y":  567,
+        "Peak":  186,
+        "Shot":  "C:\\Users\\Michael\\dev\\openv7\\captures\\pass2\\cam\\cc37.png"
+    },
+    {
+        "CC":  62,
+        "Hex":  "0x3E",
+        "CellPixels":  161,
+        "TotalPixels":  1304,
+        "X":  540,
+        "Y":  569,
+        "Peak":  190,
+        "Shot":  "C:\\Users\\Michael\\dev\\openv7\\captures\\pass2\\cam\\cc3E.png"
+    },
+    {
+        "CC":  74,
+        "Hex":  "0x4A",
+        "CellPixels":  104,
+        "TotalPixels":  2535,
+        "X":  542,
+        "Y":  464,
+        "Peak":  133,
+        "Shot":  "C:\\Users\\Michael\\dev\\openv7\\captures\\pass2\\cam\\cc4A.png"
+    },
+    {
+        "CC":  87,
+        "Hex":  "0x57",
+        "CellPixels":  89,
+        "TotalPixels":  851,
+        "X":  538,
+        "Y":  451,
+        "Peak":  105,
+        "Shot":  "C:\\Users\\Michael\\dev\\openv7\\captures\\pass2\\cam\\cc57.png"
+    },
+    {
+        "CC":  89,
+        "Hex":  "0x59",
+        "CellPixels":  30,
+        "TotalPixels":  1687,
+        "X":  854,
+        "Y":  176,
+        "Peak":  115,
+        "Shot":  "C:\\Users\\Michael\\dev\\openv7\\captures\\pass2\\cam\\cc59.png"
+    },
+    {
+        "CC":  108,
+        "Hex":  "0x6C",
+        "CellPixels":  34,
+        "TotalPixels":  1328,
+        "X":  542,
+        "Y":  467,
+        "Peak":  114,
+        "Shot":  "C:\\Users\\Michael\\dev\\openv7\\captures\\pass2\\cam\\cc6C.png"
+    },
+    {
+        "CC":  119,
+        "Hex":  "0x77",
+        "CellPixels":  35,
+        "TotalPixels":  1605,
+        "X":  1064,
+        "Y":  299,
+        "Peak":  119,
+        "Shot":  "C:\\Users\\Michael\\dev\\openv7\\captures\\pass2\\cam\\cc77.png"
+    },
+    {
+        "CC":  120,
+        "Hex":  "0x78",
+        "CellPixels":  35,
+        "TotalPixels":  1335,
+        "X":  1065,
+        "Y":  300,
+        "Peak":  127,
+        "Shot":  "C:\\Users\\Michael\\dev\\openv7\\captures\\pass2\\cam\\cc78.png"
+    }
+]

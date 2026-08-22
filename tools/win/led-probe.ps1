@@ -35,8 +35,12 @@ if ($outDev -lt 0) { Write-Host ([MidiEnum]::ListAll()); throw 'No Numark V7 MID
 $rc = [MidiMon]::OpenOut($outDev)
 if ($rc -ne 0) { throw "midiOutOpen failed (rc=$rc)" }
 
-# Motor commands - excluded so the platter does not start mid-sweep.
-$MOTOR_CC = @(0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47, 0x48, 0x49, 0x69)
+# Motor commands - excluded so the platter cannot start mid-sweep.
+# BOTH decks: deck A is 0x41-0x49 (+0x69 trim LSB), deck B is that block +0x0A,
+# i.e. 0x4B-0x53 (+0x73). Missing the deck-B half would spin the platter with
+# the A/B switch in the B position.
+$MOTOR_CC = @(0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47, 0x48, 0x49, 0x69) +
+            @(0x4B, 0x4C, 0x4D, 0x4E, 0x4F, 0x50, 0x51, 0x52, 0x53, 0x73)
 
 function New-Msg($kind, $num) {
     [pscustomobject]@{
