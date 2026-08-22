@@ -319,7 +319,7 @@ platter's own position counter as a tachometer (see
 | Brake (ramp stop) | `B0 44 00` | ✅ ramps down, duration set by `0x48` |
 | RPM select | `B0 45 vv` | ✅ `00` → **33.29 RPM**, `01` → **45.00 RPM** |
 | Direction | `B0 46 vv` | ✅ `00` fwd, `01` **reverse** (−33.38 RPM) |
-| Start / brake ramp time | `B0 47 vv` / `B0 48 vv` | ✅ higher = slower: `00` → 0.7 s, `20` → 2.7 s, `40` → 4.5 s |
+| Start / brake ramp time | `B0 47 vv` / `B0 48 vv` | ✅ higher = slower — but **quantised**, see below |
 | Pitch trim | `B0 49 msb` + `B0 69 lsb` | ✅ signed 14-bit, see below |
 
 ### Direction — the reverse gotcha (previously an open item)
@@ -336,6 +336,27 @@ B0 43 00      # soft start -> runs backwards
 
 Setting `0x46` on an already-spinning platter does nothing, which is why a
 brake-then-soft-start sequence appeared to ignore it.
+
+### Ramp times — `B0 47` / `B0 48` (and `0x51` / `0x52` on deck B) ✅
+
+Measured on deck B, timing the platter from its own position counter:
+
+| value | spin-up to 90 % | brake to stop |
+|---|---|---|
+| `0x00` | 100 ms | 600 ms |
+| `0x20` | 3300 ms | 4400 ms |
+| `0x40` | 3400 ms | 4500 ms |
+| `0x60` | 5900 ms | >7000 ms |
+| `0x7F` | 5900 ms | >7000 ms |
+
+Higher is slower, as expected — but the response is **quantised, not
+continuous**. `0x20` and `0x40` land within 100 ms of each other and
+`0x60`/`0x7F` are identical, so the byte selects one of roughly three ramp
+settings rather than sweeping a range. Deck A behaves the same way (`00` → 0.7 s,
+`20` → 2.7 s, `40` → 4.5 s).
+
+Practical consequence: mapping a knob linearly onto this value will feel dead
+across most of its travel and jump at the boundaries.
 
 ### Pitch trim — `B0 49` / `B0 69`
 

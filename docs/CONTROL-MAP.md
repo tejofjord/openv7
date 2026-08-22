@@ -223,8 +223,8 @@ directly rather than inferred.
 | `0x44` | `0x4E` | Brake | ✅ | ✅ |
 | `0x45` | `0x4F` | RPM select — `00` = 33⅓, `01` = 45 | ✅ | ✅ 33.33 / 45.00 |
 | `0x46` | `0x50` | Direction — `01` = reverse, latched while stopped | ✅ | ✅ −33.33 RPM |
-| `0x47` | `0x51` | Start ramp time | ✅ | 🔬 |
-| `0x48` | `0x52` | Brake ramp time | ✅ | 🔬 |
+| `0x47` | `0x51` | Start ramp time | ✅ | ✅ |
+| `0x48` | `0x52` | Brake ramp time | ✅ | ✅ |
 | `0x49`+`0x69` | `0x53`+`0x73` | Pitch trim, signed 14-bit | ✅ | ✅ matches the law to 0.17 RPM |
 
 `0x41`/`0x42` (instant start/stop) appear in **no** other source — not the
