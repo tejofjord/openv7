@@ -63,6 +63,16 @@ public static class WasapiTone
         int ReleaseBuffer(uint numFramesWritten, int flags);
     }
 
+    [ComImport, Guid("C8ADBD64-E71E-48A0-A4DE-185C395CD317"),
+     InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    interface IAudioCaptureClient
+    {
+        int GetBuffer(out IntPtr data, out uint numFrames, out uint flags,
+                      out long devicePosition, out long qpcPosition);
+        int ReleaseBuffer(uint numFramesRead);
+        int GetNextPacketSize(out uint numFrames);
+    }
+
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
     struct WAVEFORMATEX
     {
@@ -159,6 +169,72 @@ public static class WasapiTone
         client.Stop();
         Marshal.FreeCoTaskMem(pFormat);
         return "OK (" + LastFormat + ", buffer " + bufFrames + " frames)";
+    }
+
+    /*
+     * Open a capture stream on an input endpoint and report whether any
+     * non-zero samples arrive.
+     *
+     * The point is not the audio itself but its side effect on the wire: the
+     * V7's PCM-in endpoint streams continuously yet reads as all zeros, which
+     * suggests the ADC is muted until something actually opens the input. If
+     * opening it makes the USB payload non-zero, the input encoding becomes
+     * readable from a capture even with nothing plugged in.
+     */
+    public static string Record(string deviceId, int seconds)
+    {
+        var enumerator = (IMMDeviceEnumerator)(new MMDeviceEnumerator());
+        IMMDevice dev;
+        int hr = enumerator.GetDevice(deviceId, out dev);
+        if (hr != 0) return "GetDevice failed hr=0x" + hr.ToString("X8");
+
+        Guid iidAudioClient = new Guid("1CB9AD4C-DBFA-4C32-B178-C2F568A703B2");
+        object o;
+        hr = dev.Activate(ref iidAudioClient, CLSCTX_ALL, IntPtr.Zero, out o);
+        if (hr != 0) return "Activate failed hr=0x" + hr.ToString("X8");
+        var client = (IAudioClient)o;
+
+        IntPtr pFormat;
+        hr = client.GetMixFormat(out pFormat);
+        if (hr != 0) return "GetMixFormat failed hr=0x" + hr.ToString("X8");
+        var wf = (WAVEFORMATEX)Marshal.PtrToStructure(pFormat, typeof(WAVEFORMATEX));
+        string fmt = string.Format("ch={0} rate={1} bits={2}", wf.nChannels, wf.nSamplesPerSec, wf.wBitsPerSample);
+
+        hr = client.Initialize(SHARE_MODE_SHARED, 0, 10000000L, 0, pFormat, IntPtr.Zero);
+        if (hr != 0) return "Initialize failed hr=0x" + hr.ToString("X8") + " (" + fmt + ")";
+
+        Guid iidCapture = new Guid("C8ADBD64-E71E-48A0-A4DE-185C395CD317");
+        object o2;
+        hr = client.GetService(ref iidCapture, out o2);
+        if (hr != 0) return "GetService failed hr=0x" + hr.ToString("X8");
+        var cap = (IAudioCaptureClient)o2;
+
+        client.Start();
+        long totalFrames = 0, nonZeroBytes = 0;
+        int bytesPerFrame = wf.nBlockAlign;
+        DateTime end = DateTime.UtcNow.AddSeconds(seconds);
+        while (DateTime.UtcNow < end)
+        {
+            Thread.Sleep(10);
+            uint packet;
+            if (cap.GetNextPacketSize(out packet) != 0) break;
+            while (packet > 0)
+            {
+                IntPtr data; uint frames, flags; long dp, qp;
+                if (cap.GetBuffer(out data, out frames, out flags, out dp, out qp) != 0) break;
+                if (data != IntPtr.Zero && frames > 0)
+                {
+                    int n = (int)frames * bytesPerFrame;
+                    for (int i = 0; i < n; i++) if (Marshal.ReadByte(data, i) != 0) nonZeroBytes++;
+                }
+                totalFrames += frames;
+                cap.ReleaseBuffer(frames);
+                if (cap.GetNextPacketSize(out packet) != 0) break;
+            }
+        }
+        client.Stop();
+        Marshal.FreeCoTaskMem(pFormat);
+        return string.Format("OK ({0}) frames={1} nonZeroBytes={2}", fmt, totalFrames, nonZeroBytes);
     }
 
     static void WriteFrames(IntPtr buf, uint frames, int ch, ushort tag, ushort bits,

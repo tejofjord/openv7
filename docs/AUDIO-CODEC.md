@@ -94,13 +94,23 @@ and deck B stereo pairs respectively.
 
 ### The input side is still unknown
 
-Bulk IN `0x86` carried **all zeros** during both the tone and the silence,
-because nothing was connected to the V7's line input. Its *rate* is pinned
-(64 B/frame × 44.1 kHz) and that frame size matches Ozzy's
+Bulk IN `0x86` carried **all zeros** during both the tone and the silence. Its
+*rate* is pinned (64 B/frame × 44.1 kHz) and that frame size matches Ozzy's
 `PLOYTEC_IN_FRAME_SIZE` exactly, which is suggestive of the 64-byte
-bit-per-byte input layout — but with no signal present this capture cannot
-confirm it. Determining the input encoding needs a capture with a live source
-plugged into the V7's inputs.
+bit-per-byte input layout — but with no signal present, nothing can be
+confirmed.
+
+The obvious suspicion was that the ADC sits muted until something opens the
+input, so this was tested: a WASAPI capture stream was opened on the
+`Line In (Numark V7 Audio)` endpoint for 5 seconds. It delivered **220,059
+frames (44,011/s — the stream is real and running) with zero non-zero bytes**.
+So the endpoint is genuinely streaming digital silence, not gated off.
+
+**This one is hard-blocked on physical cabling.** Determining the input
+encoding requires an actual signal at the V7's rear inputs — either a source
+plugged in, or an RCA loopback from the V7's own outputs back to its inputs,
+with a capture running while audio plays. Everything else about the input is
+already measured.
 
 ## The codec
 

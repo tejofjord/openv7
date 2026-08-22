@@ -198,7 +198,17 @@ Byte 2 of the firmware response (step 1) is a decimal-encoded version:
 - ✅ **Input** example: platter motion → `B0 00 vv` (deck A, CC `0x00`) /
   `B0 02 vv` (deck B, CC `0x02`), a wrapping 7-bit position counter, paired
   1:1 with a `0xE0` pitch-bend timestamp for velocity.
-- ✅ `B0 7D xx` / `B0 6E xx` appear at ~idle rate — device heartbeat/status.
+- ⚠️ `B0 7D xx` / `B0 6E xx` were previously recorded here as an idle
+  heartbeat. **Under the vendor driver there is no idle heartbeat at all**: in a
+  45-second hands-off window the capture shows *zero* packets on bulk IN `0x83`
+  (see the keepalive section below). The device is completely silent when
+  nothing is being touched.
+
+  That does not mean the earlier macOS observation was imagined — OpenV7 does
+  two things the vendor driver never does (a 25 ms `0xFD` frame on `0x04` and a
+  2 s EP0 status re-arm), and the "heartbeat" is most likely a *response* to
+  those rather than something the device emits on its own. Worth re-checking on
+  the Mac once the iso pacing is corrected and those workarounds are removed.
 
 ### Platter reporting — measured
 

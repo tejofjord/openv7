@@ -175,6 +175,26 @@ and the pitch-trim law — are in [PROTOCOL.md](PROTOCOL.md).
 
 ---
 
+## Why the 🔬 rows are still 🔬
+
+Every non-contact avenue for confirming these has been tried and failed:
+
+- **A control-state dump at init.** Many controllers report the position of
+  every fader and knob when the driver attaches. Captured a full driver
+  re-init: the V7 sends **nothing** on bulk IN `0x83` afterwards.
+- **An idle heartbeat to piggyback on.** There is none — 45 seconds of
+  hands-off capture contains zero `0x83` packets.
+- **A query/response channel.** Sweeping every CC and note-on across
+  `0x00`–`0x7F` produced no reply; the only request/response path on the device
+  is the SysEx identity inquiry, which returns a fixed string.
+- **A second independent published mapping** to corroborate the Mixxx
+  addresses. None exists publicly for the V7.
+
+The device only speaks when a control is physically moved, so the remaining
+rows need a person at the controller. The platter is the exception and is
+already ✅ — it can be driven by the motor commands and read back through its
+own position counter, which is how the motor set was measured.
+
 ## Confirming the 🔬 rows
 
 Both directions can be verified on hardware with the Windows tooling:
