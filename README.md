@@ -174,6 +174,7 @@ The V7 exposes two vendor-specific USB interfaces. OpenV7:
 | [docs/AUDIO-CODEC.md](docs/AUDIO-CODEC.md) | The Ploytec bit-interleaved format, packet framing, and why MIDI lives inside the audio packets |
 | [docs/VENDOR-DRIVER.md](docs/VENDOR-DRIVER.md) | Static analysis of the stock Windows driver — the keepalive and recovery mechanisms |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | What is left |
+| [docs/HANDOFF-MAC.md](docs/HANDOFF-MAC.md) | **Start here to continue the work** — what to change, in what order, and the traps that present as broken code |
 
 `tools/win/` holds the Windows reverse-engineering harness used to measure the
 motor set (see [docs/CONTROL-MAP.md](docs/CONTROL-MAP.md) for how to run it).
