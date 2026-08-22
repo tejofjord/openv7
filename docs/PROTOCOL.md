@@ -55,6 +55,40 @@ Ploytec vendor + USB-audio control requests, in order (all ✅):
 Then submit isochronous OUT packets on `0x02` (silence is fine). **The device
 sends nothing on the control-IN endpoint until this clock is running.**
 
+### What the status byte actually means
+
+Steps 2/5/6 above are not magic. Vendor request `'I'` (`0x49`) addresses
+**hardware control registers** selected by `wIndex` — `0` = AJ input selector /
+digital status, `1` = mixer / CPLD config, `2` = digital output selector
+(write-only). The status byte decodes as:
+
+| Bit | Meaning |
+|---|---|
+| `0x01` | USB1 mode |
+| `0x02` | clock source select (internal / external) |
+| `0x04` | **digital signal lock** |
+| `0x10` | StreamingArmed |
+| `0x20` | LegacyActive — **this is the bit the confirm write-back sets** |
+| `0x08`, `0x40`, `0x80` | device-dependent mode/config |
+
+So the V7's observed `0x12` is `0x10` (StreamingArmed) + `0x02` (clock source),
+and the arm step rewrites it as `0x32`. The Allen & Heath Xone DB2 — a sibling
+Ploytec device — powers up with the *same* `0x12` and confirms to the same
+`0x32`, so OpenV7's `(status | 0x20)` is the general Ploytec handshake rather
+than a V7 quirk.
+
+**Always read-modify-write this register, never blindly overwrite it** — most of
+the bits are stateful device configuration, and the driver masks rather than
+replaces. Note also that `wValue` on the write is *sign-extended from a byte*
+(`(short)(char)b`), so the high byte is `0xFF` whenever bit 7 is set.
+
+Source for the bit meanings: [Ozzy](https://github.com/mischa85/Ozzy)'s Ploytec
+RE notes, which cross-confirm the Windows and macOS vendor drivers. See
+[AUDIO-CODEC.md](AUDIO-CODEC.md).
+
+Byte 2 of the firmware response (step 1) is a decimal-encoded version:
+`v1.{b/10}.{b%10}` — OpenV7 currently reads only byte 0.
+
 ## Control stream framing
 
 - ✅ Control data is **standard MIDI** wrapped in the bulk stream, padded with
@@ -182,7 +216,14 @@ a stop. Reverse is `0x46`.
 
 ## Audio codec (not yet implemented)
 
-The V7's audio is a Ploytec **bit-sliced** format (channels interleaved at the
-bit level), 24-bit / 44.1 kHz, 4 output channels (deck A + deck B stereo), no
-inputs. The iso-OUT packet is 156 bytes. Decoding/encoding this is the main
-remaining work for native audio support — see [ROADMAP.md](ROADMAP.md).
+The V7's audio is a Ploytec **bit-interleaved** format (channels spread across
+the packet at the bit level), 24-bit / 44.1 kHz. The iso-OUT packet is 156 bytes.
+Decoding/encoding this is the main remaining work for native audio support.
+
+**See [AUDIO-CODEC.md](AUDIO-CODEC.md)** for the codec structure, the packet
+framing (including why the `0xFD` control padding is really the MIDI slots of
+the audio packet layout), and what still has to be measured on a V7.
+
+Note the "no inputs" claim in earlier revisions of this file was wrong — the
+vendor driver exposes a capture endpoint. Channel count for the V7 specifically
+is not established; the Ploytec codec core is 8-channel.

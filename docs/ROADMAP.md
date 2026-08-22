@@ -21,7 +21,12 @@
 - [ ] Homebrew formula
 
 ## v2 — native audio
-- [ ] Decode/encode the Ploytec bit-sliced 24-bit/44.1k, 4-out codec
+- [x] Document the Ploytec bit-interleaved codec and packet framing —
+      [AUDIO-CODEC.md](AUDIO-CODEC.md)
+- [ ] Measure the V7's actual iso-OUT packet geometry (its 156-byte packet does
+      not match the Xone 48-byte frame — needs a capture)
+- [ ] Implement encode/decode (Ozzy's `ploytec_codec.c` is MIT; adapt with
+      attribution)
 - [ ] Expose a CoreAudio virtual device (AudioServerPlugin) so the V7's own
       outputs are selectable in any app
 - [ ] Sync the audio device clock to the iso stream
