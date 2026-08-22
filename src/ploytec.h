@@ -26,8 +26,27 @@
 #define V7_EP_AUDIO_IN      0x81     /* iso IN   — audio return (unused) */
 #define V7_EP_AUX_IN        0x86     /* bulk IN  — audio return (drained) */
 
-#define V7_ISO_PKT_SIZE     156      /* wMaxPacketSize of the iso-OUT endpoint */
+#define V7_ISO_PKT_SIZE     156      /* wMaxPacketSize of the iso-OUT endpoint.
+                                    * A CEILING, NOT A TARGET. The vendor driver never
+                                    * fills it; see V7_ISO_* pacing constants below. */
 #define V7_ISO_IN_PKT_SIZE  64       /* wMaxPacketSize of the iso-IN endpoint (must be drained) */
+
+/* --- iso-OUT pacing (measured from the vendor driver, docs/AUDIO-CODEC.md) ---
+ * The endpoint is serviced once per 125 us microframe (8000/s). At 44.1 kHz that
+ * is 44100/8000 = 5.5125 audio frames per packet, so packet sizes alternate
+ * 72 B (6 frames) / 60 B (5 frames) with an occasional extra 6 to make up the
+ * fractional 0.0125. The vendor driver measures 529,303 B/s; a fixed 156 B every
+ * microframe would be 1,248,000 B/s -- a 2.36x overfeed of a fixed-rate consumer.
+ *
+ * NOTE: a STRICT 72/60 alternation averages 5.5 frames = 44,000 Hz, which is
+ * 0.23 % slow -- an order of magnitude worse than the 0.02 % the capture showed.
+ * The rate is therefore held with a fractional accumulator, not by alternating.
+ */
+#define V7_ISO_FRAME_BYTES  12       /* 4 ch x 24-bit signed LE, interleaved (S24_3LE) */
+#define V7_ISO_PKTS_PER_SEC 8000     /* one iso-OUT packet per 125 us microframe */
+#define V7_ISO_FRAMES_MIN   5        /* 60 B packet */
+#define V7_ISO_FRAMES_MAX   6        /* 72 B packet */
+#define V7_ISO_PKT_MAX      (V7_ISO_FRAMES_MAX * V7_ISO_FRAME_BYTES)   /* 72 */
 #define V7_NUM_INTERFACES   2
 #define V7_ALT_SETTING      1
 

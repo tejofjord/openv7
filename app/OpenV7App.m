@@ -20,6 +20,27 @@ static NSColor *HEX(int r,int g,int b,double a){ return [NSColor colorWithSRGBRe
 @property CFTimeInterval hitUntil;     // glow deadline
 @property int lastVal;                 // for faders/strip position
 @property BOOL hasMap; @property uint8_t status, d0;
+/* Deck-B address. The V7 addresses the two decks separately (deck B = deck A
+   + 0x21 for notes; CCs are individually assigned) and the DECK SELECT switch
+   decides which block the hardware actually emits. A tester must light up on
+   EITHER, otherwise the panel is silently dead whenever the switch is on the
+   deck the map does not cover -- which is exactly the bug this replaces.
+   d0B == 0xFF means "this control has no separate deck-B address". */
+@property uint8_t d0B;
+/* The shipped defaults, kept separately so "clear map" restores them instead of
+   blanking the panel -- loadMap resets to these before applying saved overrides. */
+@property BOOL defHasMap; @property uint8_t defStatus, defD0;
+@property double knobAngle;             // accumulated angle, relative encoders only
+/* Several knobs are ALSO push-buttons (BROWSE loads the track, FX SELECT docks
+   the FX GUI). The push is a separate note-on address, unrelated to the CC that
+   carries the rotation, so a knob needs both. 0 = this knob does not push.
+   Remember: a release is note-on with velocity 0, never note-off 0x80. */
+@property uint8_t pressStatus, pressD0, pressD0B;
+/* Fader polarity is NOT uniform on this deck: PITCH reports its high value at
+   the "+" end, which is physically at the BOTTOM, while FX MIX runs the normal
+   way up. One shared convention renders one of them upside down. */
+@property BOOL faderInverted;
+@property BOOL pressHeld;
 @end
 @implementation V7Control @end
 
@@ -37,6 +58,8 @@ static NSColor *HEX(int r,int g,int b,double a){ return [NSColor colorWithSRGBRe
 @property (assign) double platterAngle;        // accumulated rotation (radians)
 @property (assign) int    platterPos;          // last encoder position (0..127), -1 = none
 @property (assign) CFTimeInterval platterSpinUntil;   // "actively spinning" deadline
+@property (assign) int    activeDeck;          // 0 = A, 1 = B, tracked from B0 7D
+@property (assign) int    revState;            // BLEEP/REVERSE: 0 centre, 1 BLEEP, 2 REVERSE
 @end
 
 @implementation DeviceView
@@ -45,56 +68,89 @@ static NSColor *HEX(int r,int g,int b,double a){ return [NSColor colorWithSRGBRe
 - (instancetype)initWithFrame:(NSRect)f {
     if ((self = [super initWithFrame:f])) {
         _controls = [NSMutableArray array];
-        // id, label, x,y,w,h, kind  — coords are 0..1 of the panel, y from TOP
-        // (isFlipped). Laid out to match the real single-deck Numark V7 panel.
+        /* id, label, x,y,w,h, kind, status, deck-A d0, deck-B d0
+           ------------------------------------------------------------------
+           Geometry is MEASURED, not estimated: the 41 numbered callouts on the
+           VirtualDJ V7 control diagram (500x553) were located by detecting the
+           blue badge blobs, and the large elements were measured directly --
+           the platter is a true circle, centre (250,284) r=166, and the strip
+           and pitch-fader slots were scanned edge to edge. Values below are
+           those pixels over 500 / 553, so the panel keeps the real V7's
+           proportions (aspect 0.9042) at any window size.
+
+           MIDI addresses come from docs/CONTROL-MAP.md (88/89 inputs measured
+           on hardware). -1 = no address. Buttons are note-on 0x90 (a release is
+           velocity 0, NEVER note-off 0x80); continuous controls are CC 0xB0.
+           ------------------------------------------------------------------ */
         NSArray *L = @[
-          // --- top row: strip search + browse encoder ---
-          @[@"strip",  @"STRIP SEARCH",@.30,@.025,@.30,@.030,@"strip"],
-          @[@"browse", @"BROWSE",      @.82,@.03, @.12,@.11, @"knob"],
-          // --- top-left: loop controls ---
-          @[@"loop",   @"LOOP",        @.055,@.075,@.095,@.045,@""],
-          @[@"loopin", @"IN",          @.055,@.128,@.060,@.045,@""],
-          @[@"loopout",@"OUT",         @.120,@.128,@.060,@.045,@""],
-          @[@"loopsel",@"SELECT",      @.185,@.128,@.065,@.045,@""],
-          @[@"reloop", @"RELOOP",      @.255,@.128,@.070,@.045,@""],
-          // --- top-right: back/fwd + load A/B ---
-          @[@"back",   @"BACK",        @.62, @.075,@.085,@.045,@""],
-          @[@"fwd",    @"FWD",         @.715,@.075,@.085,@.045,@""],
-          @[@"loada",  @"LOAD A",      @.62, @.128,@.085,@.045,@""],
-          @[@"loadb",  @"LOAD B",      @.715,@.128,@.085,@.045,@""],
-          // --- left column ---
-          @[@"motor",  @"MOTOR",       @.05, @.225,@.13, @.055,@""],
-          @[@"sleep",  @"SLEEP",       @.05, @.290,@.13, @.050,@""],
-          @[@"reverse",@"REVERSE",     @.05, @.348,@.13, @.050,@""],
-          @[@"censor", @"CENSOR",      @.05, @.406,@.13, @.050,@""],
-          @[@"fxsel",  @"FX SEL",      @.055,@.485,@.11, @.09, @"knob"],
-          @[@"fxparam",@"FX PARAM",    @.065,@.620,@.09, @.16, @"fader"],
-          @[@"fxon",   @"FX ON",       @.05, @.885,@.13, @.055,@""],
-          // --- center: platter ---
-          @[@"platter",@"",            @.275,@.185,@.45, @.45, @"platter"],
-          // --- right column: master/range + pitch fader + bend ---
-          @[@"master", @"MASTER",      @.80, @.235,@.12, @.048,@""],
-          @[@"tempo",  @"TEMPO",       @.80, @.293,@.12, @.048,@""],
-          @[@"range",  @"RANGE",       @.80, @.351,@.12, @.048,@""],
-          @[@"pitch",  @"PITCH",       @.865,@.44, @.075,@.30, @"fader"],
-          @[@"bendm",  @"BEND −",      @.775,@.795,@.085,@.05, @""],
-          @[@"bendp",  @"BEND +",      @.865,@.795,@.085,@.05, @""],
-          // --- bottom-center: hot-cue pads + transport ---
-          @[@"pad1",   @"1",           @.285,@.675,@.075,@.06, @"pad"],
-          @[@"pad2",   @"2",           @.365,@.675,@.075,@.06, @"pad"],
-          @[@"pad3",   @"3",           @.445,@.675,@.075,@.06, @"pad"],
-          @[@"pad4",   @"4",           @.525,@.675,@.075,@.06, @"pad"],
-          @[@"pad5",   @"5",           @.605,@.675,@.075,@.06, @"pad"],
-          @[@"sync",   @"SYNC",        @.295,@.78, @.12, @.09, @"big"],
-          @[@"cue",    @"CUE",         @.435,@.78, @.12, @.09, @"big"],
-          @[@"play",   @"PLAY",        @.575,@.78, @.12, @.09, @"big"],
+          @[@"strip",      @"STRIP SEARCH",   @0.34600,@0.03074,@0.30800,@0.03978,@"strip",@176,@69,@77],
+          @[@"beatdiff",   @"BEAT DIFF",      @0.42400,@0.10488,@0.16000,@0.02170,@"meter",@0,@-1,@-1],
+          @[@"browse",     @"BROWSE",         @0.80400,@0.01447,@0.07200,@0.06510,@"encoder",@176,@68,@-1],
+          @[@"loopctl",    @"L.CTRL",   @0.06200,@0.07052,@0.06800,@0.03978,@"btn",@144,@36,@69],
+          @[@"loopmode",   @"MODE",      @0.22400,@0.06329,@0.06800,@0.03978,@"btn",@144,@39,@72],
+          @[@"loopin",     @"IN",        @0.02200,@0.12658,@0.06800,@0.03978,@"btn",@144,@40,@73],
+          @[@"loopout",    @"OUT",       @0.10400,@0.12658,@0.06800,@0.03978,@"btn",@144,@41,@74],
+          @[@"loopsel",    @"SEL",         @0.18800,@0.12658,@0.06800,@0.03978,@"btn",@144,@42,@75],
+          @[@"reloop",     @"RELP",         @0.27400,@0.12658,@0.06800,@0.03978,@"btn",@144,@43,@76],
+          @[@"loophalf",   @"1/2",        @0.02400,@0.18264,@0.06800,@0.03978,@"btn",@144,@34,@67],
+          @[@"loopdbl",    @"x2",        @0.10400,@0.18264,@0.06800,@0.03978,@"btn",@144,@35,@68],
+          @[@"loopprev",   @"<",         @0.18600,@0.18264,@0.06800,@0.03978,@"btn",@144,@37,@70],
+          @[@"loopnext",   @">",         @0.27200,@0.18264,@0.06800,@0.03978,@"btn",@144,@38,@71],
+          @[@"back",       @"BACK",           @0.72800,@0.10488,@0.07600,@0.03978,@"btn",@144,@6,@-1],
+          @[@"fwd",        @"FWD",            @0.91000,@0.10127,@0.07600,@0.03978,@"btn",@144,@7,@-1],
+          @[@"crates",     @"CRATES",         @0.72800,@0.16094,@0.07600,@0.03978,@"btn",@144,@11,@-1],
+          @[@"prepare",    @"PREP",        @0.81600,@0.16094,@0.07600,@0.03978,@"btn",@144,@9,@-1],
+          @[@"files",      @"FILES",          @0.91000,@0.15913,@0.07600,@0.03978,@"btn",@144,@10,@-1],
+          @[@"loada",      @"LOAD A",         @0.72800,@0.20976,@0.07600,@0.03978,@"btn",@144,@12,@-1],
+          @[@"loadprep",   @"LD PRP",      @0.81600,@0.20976,@0.07600,@0.03978,@"btn",@144,@13,@-1],
+          @[@"loadb",      @"LOAD B",         @0.91000,@0.20796,@0.07600,@0.03978,@"btn",@144,@14,@-1],
+          @[@"decksel",    @"DECK",    @0.79600,@0.25678,@0.11200,@0.03978,@"switch",@144,@92,@-1],
+          @[@"master",     @"MASTER",       @0.82400,@0.32550,@0.06800,@0.02893,@"btn",@144,@84,@91],
+          @[@"motoroff",   @"MOTOR",      @0.10000,@0.26401,@0.08000,@0.03617,@"btn",@144,@33,@66],
+          @[@"starttime",  @"START",     @0.19600,@0.24231,@0.05600,@0.05063,@"knob",@176,@70,@78],
+          @[@"stoptime",   @"STOP",      @0.14000,@0.32188,@0.05600,@0.05063,@"knob",@176,@71,@79],
+          @[@"reverse",    @"BLEEP",      @0.04000,@0.30380,@0.06800,@0.09403,@"switch",@144,@28,@61],
+          @[@"tap",        @"TAP",            @0.04000,@0.45570,@0.08800,@0.04340,@"btn",@144,@30,@63],
+          @[@"fxsel",      @"FX SEL",      @0.05600,@0.54250,@0.06800,@0.06148,@"encoder",@176,@90,@91],
+          @[@"fxparam",    @"FX PRM",       @0.03200,@0.62929,@0.07600,@0.06872,@"encoder",@176,@88,@86],
+          @[@"fxmix",      @"FX MIX",         @0.04800,@0.71971,@0.06000,@0.12658,@"fader",@176,@87,@89],
+          @[@"fxon",       @"FX ON",      @0.03600,@0.90416,@0.08800,@0.04702,@"btn",@144,@82,@89],
+          @[@"platter",    @"JOG",            @0.16800,@0.21338,@0.66400,@0.60036,@"platter",@176,@0,@2],
+          @[@"mtempo",     @"M.TEMPO",   @0.87600,@0.40506,@0.08400,@0.04340,@"btn",@144,@27,@60],
+          @[@"range",      @"RANGE",          @0.87600,@0.45750,@0.08400,@0.04340,@"btn",@144,@26,@59],
+          @[@"pitch",      @"PITCH",          @0.87000,@0.54250,@0.10000,@0.25136,@"fader",@176,@4,@5],
+          @[@"bendm",      @"\u2212",         @0.85000,@0.92586,@0.06000,@0.04340,@"btn",@144,@24,@57],
+          @[@"bendp",      @"+",         @0.91600,@0.92586,@0.06000,@0.04340,@"btn",@144,@25,@58],
+          @[@"delete",     @"DEL",         @0.24000,@0.83906,@0.06400,@0.04340,@"btn",@144,@18,@51],
+          @[@"pad1",       @"1",              @0.37200,@0.83906,@0.06600,@0.04340,@"pad",@144,@19,@52],
+          @[@"pad2",       @"2",              @0.44600,@0.83906,@0.06600,@0.04340,@"pad",@144,@20,@53],
+          @[@"pad3",       @"3",              @0.52000,@0.83906,@0.06600,@0.04340,@"pad",@144,@21,@54],
+          @[@"pad4",       @"4",              @0.59400,@0.83906,@0.06600,@0.04340,@"pad",@144,@22,@55],
+          @[@"pad5",       @"5",              @0.66800,@0.83906,@0.06600,@0.04340,@"pad",@144,@23,@56],
+          @[@"sync",       @"SYNC",           @0.32500,@0.91863,@0.10400,@0.07233,@"big",@144,@15,@48],
+          @[@"cue",        @"CUE",            @0.44080,@0.91863,@0.10400,@0.07233,@"big",@144,@16,@49],
+          @[@"play",       @"PLAY",           @0.57300,@0.91863,@0.10400,@0.07233,@"big",@144,@17,@50],
         ];
         for (NSArray *a in L) {
             V7Control *c = [V7Control new];
             c.cid=a[0]; c.label=a[1];
             c.frac=NSMakeRect([a[2] doubleValue],[a[3] doubleValue],[a[4] doubleValue],[a[5] doubleValue]);
             c.kind=a[6]; c.lastVal=-1;
+            int st=[a[7] intValue], dA=[a[8] intValue], dB=[a[9] intValue];
+            if(st && dA>=0){ c.defHasMap=YES; c.defStatus=(uint8_t)st; c.defD0=(uint8_t)dA; }
+            c.d0B = (dB>=0) ? (uint8_t)dB : 0xFF;
             [_controls addObject:c];
+        }
+        /* Knob presses -- MEASURED on this hardware, not inferred.
+           BROWSE push = note 0x08. That also settles an open question in the
+           docs, which had 0x08 flagged as "not LOAD PREPARE" with its panel
+           label unidentified: it is the browse encoder's push.
+           FX SELECT push = note 0x5A (its rotation is CC 0x5B).
+           These are separate from the rotation CC, so a knob carries both. */
+        for(V7Control *c in _controls){
+            if([c.cid isEqual:@"browse"]){ c.pressStatus=0x90; c.pressD0=0x08; c.pressD0B=0xFF; }
+            if([c.cid isEqual:@"fxsel"]) { c.pressStatus=0x90; c.pressD0=0x5A; c.pressD0B=0xFF; }
+            if([c.cid isEqual:@"fxmix"])  c.faderInverted=YES;   /* max at the top */
         }
         [self loadMap];
         _platterPos = -1;
@@ -102,27 +158,85 @@ static NSColor *HEX(int r,int g,int b,double a){ return [NSColor colorWithSRGBRe
     return self;
 }
 
-- (NSRect)rectFor:(V7Control*)c {
+/* The real V7 deck face is 500 x 553 (aspect 0.9042). Laying the fractional
+   coordinates out over the raw view bounds would stretch the panel whenever the
+   window aspect differs -- the platter would render as an ellipse. Instead fit a
+   centred, aspect-correct panel inside the bounds and place everything in that,
+   so the proportions stay true at any window size. */
+#define V7_PANEL_ASPECT (500.0/553.0)
+- (NSRect)panelRect {
     NSRect b=self.bounds;
-    return NSMakeRect(c.frac.origin.x*b.size.width, c.frac.origin.y*b.size.height,
+    CGFloat w=b.size.width, h=w/V7_PANEL_ASPECT;
+    if (h > b.size.height) { h=b.size.height; w=h*V7_PANEL_ASPECT; }
+    return NSMakeRect(b.origin.x+(b.size.width-w)/2, b.origin.y+(b.size.height-h)/2, w, h);
+}
+- (NSRect)rectFor:(V7Control*)c {
+    NSRect b=[self panelRect];
+    return NSMakeRect(b.origin.x + c.frac.origin.x*b.size.width,
+                      b.origin.y + c.frac.origin.y*b.size.height,
                       c.frac.size.width*b.size.width, c.frac.size.height*b.size.height);
 }
 
+/* Match a control on EITHER deck's address. The hardware only ever emits the
+   block the DECK SELECT switch has live, so binding to deck A alone leaves the
+   whole panel dark whenever the switch is on B -- the previous behaviour. */
 - (V7Control*)controlForStatus:(uint8_t)s d0:(uint8_t)d0 {
-    for (V7Control *c in _controls) if (c.hasMap && c.status==s &&
-        (((s&0xF0)==0xE0) || c.d0==d0)) return c;
+    for (V7Control *c in _controls)
+        if (c.hasMap && c.status==s && (c.d0==d0 || (c.d0B!=0xFF && c.d0B==d0))) return c;
     return nil;
 }
 
+- (V7Control*)controlForPress:(uint8_t)s d0:(uint8_t)d0 {
+    for (V7Control *c in _controls)
+        if (c.pressStatus && c.pressStatus==s &&
+            (c.pressD0==d0 || (c.pressD0B!=0xFF && c.pressD0B==d0))) return c;
+    return nil;
+}
 - (void)flashStatus:(uint8_t)s d0:(uint8_t)d0 d1:(uint8_t)d1 {
+    /* B0 7D reports the DECK SELECT position (00 = A, 01 = B). It is not a
+       control, so it must be read BEFORE the lookup that returns on no match.
+       The platter counter is per-deck, so drop the stale position on a switch
+       or the first message after it spins the platter by a bogus delta. */
+    if (s==0xB0 && d0==0x7D) {
+        int deck = d1 ? 1 : 0;
+        if (deck != _activeDeck) { _activeDeck = deck; _platterPos = -1; }
+        self.needsDisplay=YES;
+    }
+    /* A knob's push arrives on its own note address, so it must be looked up
+       separately from the rotation CC. Velocity 0 is the RELEASE (the V7 never
+       sends note-off 0x80), which is what clears the held state. */
+    /* BLEEP / REVERSE is a three-position switch, not a button, and the two
+       positions report on SEPARATE notes. MEASURED: 0x1D latches -- it went 7F
+       and stayed on for 11.5 s until the switch was moved back, which is the
+       persistent REVERSE detent. BLEEP is the momentary one (spring-loaded, the
+       censor), inferred as 0x1C from the pair documented in CONTROL-MAP.md; it
+       did not fire during the capture, so that half is NOT yet measured. */
+    if (s==0x90 && (d0==0x1C||d0==0x3D)) { _revState = d1?1:0; self.needsDisplay=YES; }
+    if (s==0x90 && (d0==0x1D||d0==0x3E)) { _revState = d1?2:0; self.needsDisplay=YES; }
+    V7Control *pc=[self controlForPress:s d0:d0];
+    if(pc){ pc.pressHeld=(d1!=0); pc.hitUntil=CFAbsoluteTimeGetCurrent()+0.18;
+            self.needsDisplay=YES; return; }
     V7Control *c=[self controlForStatus:s d0:d0]; if(!c) return;
     c.hitUntil = CFAbsoluteTimeGetCurrent()+0.18;
-    if ([c.kind isEqual:@"fader"]||[c.kind isEqual:@"strip"]) c.lastVal=d1;
+    if ([c.kind isEqual:@"fader"]||[c.kind isEqual:@"strip"]||[c.kind isEqual:@"knob"]) c.lastVal=d1;
+    /* Relative encoders report DIRECTION, not position: 0x01 = one detent
+       clockwise, 0x7F = one anticlockwise (docs/HANDOFF-MAC.md). Treating that
+       value as an absolute position would peg the pointer at one end. */
+    if ([c.kind isEqual:@"encoder"]) c.knobAngle += ((d1 > 64) ? -1 : 1) * (2*M_PI/32.0);
     if ([c.kind isEqual:@"platter"]) {
         if (_platterPos >= 0) {
             int delta = (int)d1 - _platterPos;        // signed shortest path on the 0..127 ring
             if (delta > 64) delta -= 128; else if (delta < -64) delta += 128;
-            _platterAngle -= delta * (2*M_PI/1024.0);  // ~1024 ticks per visual turn (tunable)
+            /* SIGN: this view isFlipped (y grows downward), so a POSITIVE angle
+               passed to rotateByRadians: renders CLOCKWISE -- the opposite of the
+               usual unflipped convention. The encoder counts up as the platter
+               turns forward/clockwise, so the angle must ADD. Subtracting (the
+               previous behaviour) spun the on-screen platter backwards.
+
+               SCALE: the platter is a measured 3600 counts/rev (PROTOCOL.md), so
+               2*pi/3600 per count tracks the real platter 1:1. The previous 1024
+               was a placeholder marked "tunable" and span the GUI ~3.5x too fast. */
+            _platterAngle += delta * (2*M_PI/3600.0);
         }
         _platterPos = d1;
         _platterSpinUntil = CFAbsoluteTimeGetCurrent() + 0.30;
@@ -153,9 +267,19 @@ static NSColor *HEX(int r,int g,int b,double a){ return [NSColor colorWithSRGBRe
 - (void)label:(NSString*)t in:(NSRect)r color:(NSColor*)col size:(CGFloat)sz {
     if(!t.length) return;
     NSMutableParagraphStyle *ps=[NSMutableParagraphStyle new]; ps.alignment=NSTextAlignmentCenter;
-    NSDictionary *at=@{NSFontAttributeName:[NSFont systemFontOfSize:sz weight:NSFontWeightBold],
+    /* Shrink to fit. drawInRect: silently CLIPS overflow, which is how the panel
+       ended up showing "LOOP" for LOOP CONTROL, "SELEC" for SELECT and "PREPA"
+       for PREPARE -- the text was simply wider than its control. Step the size
+       down until it fits, with a floor so it never becomes unreadable. */
+    NSFont *fnt=nil; NSSize ts=NSZeroSize; CGFloat avail=r.size.width-2;
+    for(;;){
+        fnt=[NSFont systemFontOfSize:sz weight:NSFontWeightBold];
+        ts=[t sizeWithAttributes:@{NSFontAttributeName:fnt}];
+        if(ts.width<=avail || sz<=6.0) break;
+        sz-=0.5;
+    }
+    NSDictionary *at=@{NSFontAttributeName:fnt,
         NSForegroundColorAttributeName:col, NSParagraphStyleAttributeName:ps};
-    NSSize ts=[t sizeWithAttributes:at];
     [t drawInRect:NSMakeRect(r.origin.x, r.origin.y+(r.size.height-ts.height)/2, r.size.width, ts.height) withAttributes:at];
 }
 
@@ -169,7 +293,10 @@ static NSColor *HEX(int r,int g,int b,double a){ return [NSColor colorWithSRGBRe
     for (V7Control *c in _controls) {
         NSRect r=[self rectFor:c];
         CGFloat glow = MAX(0,(c.hitUntil-now)/0.18);
-        NSColor *accent = HEX(47,139,255,1), *cyan=HEX(76,201,255,1), *hot=HEX(255,92,122,1);
+        /* Numark red. The hierarchy is kept inside the red family so active vs
+           live vs pad-hit still read apart: accent is the brand red, hilite a
+           brighter red for live/held state, hot a warm red-orange for pads. */
+        NSColor *accent = HEX(206,26,42,1), *hilite=HEX(255,74,86,1), *hot=HEX(255,138,74,1);
 
         if ([c.kind isEqual:@"platter"]) {
             CGFloat cx=NSMidX(r), cy=NSMidY(r), R=r.size.width/2;
@@ -185,41 +312,174 @@ static NSColor *HEX(int r,int g,int b,double a){ return [NSColor colorWithSRGBRe
             [NSGraphicsContext saveGraphicsState];
             NSAffineTransform *tr=[NSAffineTransform transform];
             [tr translateXBy:cx yBy:cy]; [tr rotateByRadians:_platterAngle]; [tr translateXBy:-cx yBy:-cy]; [tr concat];
-            NSColor *spoke = spinning ? HEX(76,201,255,0.85) : HEX(90,100,120,0.5);
+            NSColor *spoke = spinning ? HEX(255,74,86,0.85) : HEX(90,100,120,0.5);
             for(int i=0;i<8;i++){ double a=i*M_PI/4.0;
                 NSBezierPath *sp=[NSBezierPath bezierPath]; sp.lineWidth=(i==0?3.0:1.5);
                 [sp moveToPoint:NSMakePoint(cx+cos(a)*R*0.40, cy+sin(a)*R*0.40)];
                 [sp lineToPoint:NSMakePoint(cx+cos(a)*R*0.90, cy+sin(a)*R*0.90)];
-                if(i==0) [(spinning?HEX(255,92,122,1):HEX(150,90,100,1)) setStroke]; else [spoke setStroke];  // red index spoke
+                if(i==0) [(spinning?HEX(255,190,120,1):HEX(140,110,80,1)) setStroke]; else [spoke setStroke];  // index spoke: warm, to stay visible against red
                 [sp stroke]; }
             NSRect lab=NSInsetRect(r,r.size.width*0.34,r.size.height*0.34);
-            NSGradient *lg=[[NSGradient alloc] initWithStartingColor:HEX(47,139,255,1) endingColor:HEX(10,86,214,1)];
+            NSGradient *lg=[[NSGradient alloc] initWithStartingColor:HEX(214,38,50,1) endingColor:HEX(150,14,26,1)];
             [lg drawInBezierPath:[NSBezierPath bezierPathWithOvalInRect:lab] angle:-70];
             [self label:@"V7" in:lab color:NSColor.whiteColor size:r.size.height*0.11];
             [NSGraphicsContext restoreGraphicsState];
             // active-spin glow ring
-            if(spinning || glow>0){ CGFloat a=spinning?0.85:glow; [[cyan colorWithAlphaComponent:a] setStroke];
+            if(spinning || glow>0){ CGFloat a=spinning?0.85:glow; [[hilite colorWithAlphaComponent:a] setStroke];
                 NSBezierPath *g=[NSBezierPath bezierPathWithOvalInRect:NSInsetRect(r,-3,-3)]; g.lineWidth=4;[g stroke]; }
             continue;
         }
         if ([c.kind isEqual:@"fader"]) {
             [self drawRoundRect:r radius:6 fill:HEX(20,25,34,1) stroke:HEX(36,44,58,1) width:1];
-            CGFloat v = c.lastVal<0?0.5:(1.0-c.lastVal/127.0);
+            /* This view isFlipped, so v is measured DOWN from the top of the slot:
+               v=0 is the top, v=1 the bottom. The V7 reports its pitch fader with
+               the high value at the "+" end, which is at the BOTTOM of the panel
+               (see the "+%" marking under the fader on the real deck), so value
+               maps straight to v. Inverting it -- the previous 1.0-v -- made the
+               on-screen cap travel the opposite way to the physical fader. */
+            CGFloat raw = c.lastVal<0?0.5:(c.lastVal/127.0);
+            CGFloat v = c.faderInverted ? (1.0-raw) : raw;
             NSRect cap=NSMakeRect(r.origin.x+2, r.origin.y+2+v*(r.size.height-r.size.height*0.14-4), r.size.width-4, r.size.height*0.14);
-            [self drawRoundRect:cap radius:3 fill:(glow>0?cyan:accent) stroke:nil width:0];
+            [self drawRoundRect:cap radius:3 fill:(glow>0?hilite:accent) stroke:nil width:0];
             [self label:c.label in:NSMakeRect(r.origin.x-6,NSMaxY(r)+2,r.size.width+12,12) color:HEX(91,100,115,1) size:9];
             continue;
         }
         if ([c.kind isEqual:@"strip"]) {
             [self drawRoundRect:r radius:5 fill:HEX(20,25,34,1) stroke:HEX(36,44,58,1) width:1];
             if(c.lastVal>=0 && glow>0){ CGFloat x=r.origin.x+(c.lastVal/127.0)*(r.size.width-6);
-                [[cyan colorWithAlphaComponent:glow] setFill]; NSRectFill(NSMakeRect(x,r.origin.y+2,6,r.size.height-4)); }
+                [[hilite colorWithAlphaComponent:glow] setFill]; NSRectFill(NSMakeRect(x,r.origin.y+2,6,r.size.height-4)); }
             [self label:c.label in:r color:HEX(91,100,115,1) size:9];
             continue;
         }
-        // buttons / pads / knobs
+        /* Three-position BLEEP / centre / REVERSE switch. BLEEP is momentary and
+           REVERSE latches, so the lever stays parked at REVERSE until the switch
+           is physically moved back -- drawing this as a button would show a
+           180 ms flash for a state that can last minutes. */
+        if ([c.cid isEqual:@"reverse"]) {
+            [self drawRoundRect:r radius:0 fill:HEX(16,20,28,1) stroke:HEX(51,64,90,1) width:1];
+            CGFloat th=r.size.height/3.0;
+            NSRect lev=NSMakeRect(r.origin.x+2,
+                                  r.origin.y + (_revState==1?0:(_revState==2?2*th:th)) + 2,
+                                  r.size.width-4, th-4);
+            NSColor *lc = _revState==2 ? accent : (_revState==1 ? hilite : HEX(70,80,100,1));
+            [self drawRoundRect:lev radius:0 fill:lc stroke:nil width:0];
+            [self label:@"BLEEP" in:NSMakeRect(r.origin.x-8,r.origin.y-11,r.size.width+16,10)
+                  color:(_revState==1?hilite:HEX(91,100,115,1)) size:8];
+            [self label:@"REV" in:NSMakeRect(r.origin.x-8,NSMaxY(r)+1,r.size.width+16,10)
+                  color:(_revState==2?accent:HEX(91,100,115,1)) size:8];
+            continue;
+        }
+        /* BEAT DIFF is an OUTPUT-only LED bar (host -> device): it shows the phase
+           error between the two decks, white in the centre when synced, red out
+           to 25/50/75/100% of a beat. The device never reports it, so it has no
+           input address and can never light from incoming MIDI -- drawn as the
+           real segmented strip rather than a button so the panel reads correctly. */
+        if ([c.cid isEqual:@"beatdiff"]) {
+            int n=9; CGFloat gap=2.0;
+            CGFloat sw=(r.size.width-gap*(n-1))/n;
+            for(int i=0;i<n;i++){
+                NSRect seg=NSMakeRect(r.origin.x+i*(sw+gap), r.origin.y, sw, r.size.height);
+                NSColor *col = (i==n/2) ? HEX(150,160,180,1)
+                             : (abs(i-n/2)==1 ? HEX(70,52,60,1) : HEX(58,38,44,1));
+                [self drawRoundRect:seg radius:0 fill:col stroke:nil width:0];
+            }
+            [self label:c.label in:NSMakeRect(r.origin.x-20,NSMaxY(r)+1,r.size.width+40,11)
+                  color:HEX(91,100,115,1) size:8];
+            continue;
+        }
+        /* DECK SELECT is a two-position SWITCH, not a momentary button, and its
+           position is reported continuously on B0 7D (00 = A, 01 = B) rather
+           than as a press. Drawing it as a button threw away the one piece of
+           state that matters most on this deck: which block the hardware is
+           actually emitting on. Rendered as an A|B switch showing the live side. */
+        if ([c.cid isEqual:@"decksel"]) {
+            [self drawRoundRect:r radius:0 fill:HEX(16,20,28,1) stroke:HEX(51,64,90,1) width:1];
+            CGFloat hw=r.size.width/2;
+            NSRect act=NSMakeRect(r.origin.x+(_activeDeck?hw:0), r.origin.y, hw, r.size.height);
+            [self drawRoundRect:NSInsetRect(act,2,2) radius:0
+                           fill:(glow>0?hilite:accent) stroke:nil width:0];
+            [self label:@"A" in:NSMakeRect(r.origin.x,r.origin.y,hw,r.size.height)
+                  color:(_activeDeck?HEX(120,130,150,1):NSColor.whiteColor) size:11];
+            [self label:@"B" in:NSMakeRect(r.origin.x+hw,r.origin.y,hw,r.size.height)
+                  color:(_activeDeck?NSColor.whiteColor:HEX(120,130,150,1)) size:11];
+            [self label:@"DECK" in:NSMakeRect(r.origin.x-10,NSMaxY(r)+1,r.size.width+20,11)
+                  color:HEX(91,100,115,1) size:8];
+            continue;
+        }
+        /* Knobs render as actual knobs: a round body, a travel arc, and a pointer
+           that rotates. Two value sources -- an absolute knob (START/STOP TIME,
+           FX PARAM) sweeps 0..127 over 270 degrees with end stops, whereas a
+           relative ENCODER (BROWSE, FX SELECT) has no position at all and simply
+           accumulates detents, so it spins continuously and draws no arc.
+           NOTE: the view isFlipped, so screen-clockwise from 12 o'clock is
+           (sin t, -cos t) -- using the usual (cos, sin) would mirror the sweep. */
+        if ([c.kind isEqual:@"knob"] || [c.kind isEqual:@"encoder"]) {
+            BOOL enc=[c.kind isEqual:@"encoder"];
+            CGFloat cx=NSMidX(r), cy=NSMidY(r), R=MIN(r.size.width,r.size.height)/2-1;
+            double t   = (c.lastVal<0 ? 0.5 : c.lastVal/127.0);
+            double ang = enc ? c.knobAngle : (-135.0 + t*270.0)*M_PI/180.0;
+            /* Travel arc, absolute knobs only. Built from the SAME (sin,-cos)
+               parametrisation as the pointer rather than AppKit's arc helper --
+               that helper measures angles in the coordinate system, which this
+               flipped view mirrors, so it would sweep opposite to the pointer. */
+            if(!enc){
+                for(int pass=0; pass<2; pass++){          // 0 = full track, 1 = value trail
+                    double span = pass ? 270.0*t : 270.0;
+                    if(pass && t<=0.001) continue;
+                    NSBezierPath *arc=[NSBezierPath bezierPath];
+                    arc.lineWidth = pass?3.0:2.0; arc.lineCapStyle=NSLineCapStyleRound;
+                    int steps = pass ? MAX(2,(int)(span/7)) : 40;
+                    for(int i=0;i<=steps;i++){
+                        double a=(-135.0 + span*i/steps)*M_PI/180.0;
+                        NSPoint pp=NSMakePoint(cx+sin(a)*(R+3), cy-cos(a)*(R+3));
+                        if(i==0) [arc moveToPoint:pp]; else [arc lineToPoint:pp];
+                    }
+                    [(pass ? (glow>0?hilite:accent) : HEX(36,44,58,1)) setStroke];
+                    [arc stroke];
+                }
+            }
+            NSRect body=NSMakeRect(cx-R,cy-R,2*R,2*R);
+            NSBezierPath *bp=[NSBezierPath bezierPathWithOvalInRect:body];
+            NSGradient *kg=[[NSGradient alloc] initWithStartingColor:HEX(52,61,79,1)
+                                                         endingColor:HEX(17,21,29,1)];
+            [kg drawInBezierPath:bp angle:-70];
+            [(glow>0?hilite:HEX(51,64,90,1)) setStroke]; bp.lineWidth=(glow>0?2:1); [bp stroke];
+            if(enc){
+                /* A relative encoder has NO limits and no position, so a pointer
+                   would be a lie -- there is no "where it is". Draw detent marks
+                   around the rim that turn with it instead: motion and direction
+                   are the only real information the device gives us. */
+                for(int i=0;i<12;i++){
+                    double a=ang + i*(2*M_PI/12.0);
+                    NSBezierPath *tk=[NSBezierPath bezierPath];
+                    tk.lineWidth=2.0; tk.lineCapStyle=NSLineCapStyleRound;
+                    [tk moveToPoint:NSMakePoint(cx+sin(a)*R*0.70, cy-cos(a)*R*0.70)];
+                    [tk lineToPoint:NSMakePoint(cx+sin(a)*R*0.93, cy-cos(a)*R*0.93)];
+                    [(glow>0?hilite:HEX(126,138,160,1)) setStroke]; [tk stroke];
+                }
+            } else {
+                NSBezierPath *pt=[NSBezierPath bezierPath]; pt.lineWidth=2.5; pt.lineCapStyle=NSLineCapStyleRound;
+                [pt moveToPoint:NSMakePoint(cx+sin(ang)*R*0.28, cy-cos(ang)*R*0.28)];
+                [pt lineToPoint:NSMakePoint(cx+sin(ang)*R*0.82, cy-cos(ang)*R*0.82)];
+                [(glow>0?NSColor.whiteColor:HEX(150,160,180,1)) setStroke]; [pt stroke];
+            }
+            /* Pushable knobs carry a centre dot: dim when idle (so you can see
+               the knob CAN be pushed), filled and ringed while held. */
+            if(c.pressStatus){
+                NSRect dot=NSInsetRect(body,R*0.62,R*0.62);
+                NSBezierPath *dp=[NSBezierPath bezierPathWithOvalInRect:dot];
+                [(c.pressHeld?hilite:HEX(64,74,94,1)) setFill]; [dp fill];
+                if(c.pressHeld){ [NSColor.whiteColor setStroke]; dp.lineWidth=1.5; [dp stroke];
+                    NSBezierPath *hl=[NSBezierPath bezierPathWithOvalInRect:NSInsetRect(body,-2,-2)];
+                    hl.lineWidth=2; [hilite setStroke]; [hl stroke]; }
+            }
+            [self label:c.label in:NSMakeRect(r.origin.x-12,NSMaxY(r)+1,r.size.width+24,11)
+                  color:HEX(91,100,115,1) size:8];
+            continue;
+        }
+        // buttons / pads -- square corners, matching the real panel's hard edges
         BOOL pad=[c.kind isEqual:@"pad"];
-        CGFloat rad = ([c.kind isEqual:@"knob"]? r.size.height/2 : 7);
+        CGFloat rad = 0;
         NSColor *fill = HEX(20,25,34,1);
         NSColor *stroke = c.hasMap?HEX(51,64,90,1):HEX(36,44,58,1);
         if(c==_armed) stroke=HEX(217,150,58,1);
@@ -230,10 +490,14 @@ static NSColor *HEX(int r,int g,int b,double a){ return [NSColor colorWithSRGBRe
 }
 
 // ---- persistence ----
+/* Defaults now ship in the control table above (docs/CONTROL-MAP.md), so the
+   panel is live on first launch. Previously only the platter was pre-mapped --
+   and to CC 0x00, deck A -- so on a unit switched to deck B (which reports on
+   CC 0x02) literally nothing on the panel ever lit up. A saved map still wins,
+   so Learn mode can still correct any address. */
 - (void)loadMap {
     NSDictionary *m=[[NSUserDefaults standardUserDefaults] dictionaryForKey:@"map"];
-    // default known: platter deck A = CC 0x00
-    for(V7Control *c in _controls) if([c.cid isEqual:@"platter"]){ c.hasMap=YES; c.status=0xB0; c.d0=0x00; }
+    for(V7Control *c in _controls){ c.hasMap=c.defHasMap; c.status=c.defStatus; c.d0=c.defD0; }
     for(V7Control *c in _controls){ NSString *v=m[c.cid]; if(v){ NSArray *p=[v componentsSeparatedByString:@","];
         if(p.count==2){ c.hasMap=YES; c.status=(uint8_t)[p[0] intValue]; c.d0=(uint8_t)[p[1] intValue]; } } }
 }
@@ -242,7 +506,12 @@ static NSColor *HEX(int r,int g,int b,double a){ return [NSColor colorWithSRGBRe
     for(V7Control *c in _controls) if(c.hasMap) m[c.cid]=[NSString stringWithFormat:@"%d,%d",c.status,c.d0];
     [[NSUserDefaults standardUserDefaults] setObject:m forKey:@"map"];
 }
-- (void)clearMap { for(V7Control *c in _controls){ c.hasMap=NO; } [self loadMap]; [self saveMap]; self.needsDisplay=YES; }
+/* Forget user overrides and fall back to the shipped map (loadMap re-seeds from
+   the defaults), rather than leaving every control unmapped. */
+- (void)clearMap {
+    [[NSUserDefaults standardUserDefaults] removeObjectForKey:@"map"];
+    [self loadMap]; self.needsDisplay=YES;
+}
 - (NSString*)exportXML {
     NSMutableString *s=[NSMutableString stringWithString:@"<device name=\"Numark V7\" author=\"OpenV7\" type=\"MIDI\" decks=\"1\">\n"];
     for(V7Control *c in _controls) if(c.hasMap){
@@ -396,45 +665,56 @@ static void MIDIReadCB(const MIDIPacketList *pl, void *a, void *b) {
 - (void)openTester:(id)sender {
     (void)sender;
     if(_tester){ [_tester makeKeyAndOrderFront:nil]; [NSApp activateIgnoringOtherApps:YES]; return; }
-    NSRect frame=NSMakeRect(0,0,900,620);
+    /* Panel is 800 px tall so the 47 controls have room to breathe; width follows
+       the real V7 face aspect (500/553) so nothing is stretched: 800*500/553 = 724. */
+    NSRect frame=NSMakeRect(0,0,1084,832);
     _tester=[[NSWindow alloc] initWithContentRect:frame
         styleMask:NSWindowStyleMaskTitled|NSWindowStyleMaskClosable|NSWindowStyleMaskResizable
         backing:NSBackingStoreBuffered defer:NO];
     _tester.title=@"OpenV7 — Tester"; _tester.releasedWhenClosed=NO; [_tester center];
-    _tester.minSize=NSMakeSize(760,520);
+    _tester.minSize=NSMakeSize(980,700);
     NSView *cv=_tester.contentView;
 
-    _dev=[[DeviceView alloc] initWithFrame:NSMakeRect(16,16,540,588)];
+    _dev=[[DeviceView alloc] initWithFrame:NSMakeRect(16,16,724,800)];
     _dev.autoresizingMask=NSViewHeightSizable|NSViewMaxXMargin; _dev.delegate=self;
     _dev.wantsLayer=YES; _dev.layer.cornerRadius=16; _dev.layer.masksToBounds=YES;
     [cv addSubview:_dev];
 
-    CGFloat px=572, pw=312;
+    /* Right-hand pane, stacked from the top of the 832 px content view (this view
+       is NOT flipped, so y grows upward). Laid out as explicit rows because the
+       previous absolute values had drifted into overlaps when the window grew. */
+    CGFloat px=756, pw=312, bw=(pw-6)/2;
     _learnBtn=[NSButton buttonWithTitle:@"Learn mode: off" target:self action:@selector(toggleLearn:)];
-    _learnBtn.frame=NSMakeRect(px,566,150,30); _learnBtn.bezelStyle=NSBezelStyleRounded; [cv addSubview:_learnBtn];
+    _learnBtn.frame=NSMakeRect(px,790,bw,30); _learnBtn.bezelStyle=NSBezelStyleRounded; [cv addSubview:_learnBtn];
     NSButton *exp=[NSButton buttonWithTitle:@"Export map" target:self action:@selector(exportMap:)];
-    exp.frame=NSMakeRect(px+156,566,pw-156,30); exp.bezelStyle=NSBezelStyleRounded; [cv addSubview:exp];
+    exp.frame=NSMakeRect(px+bw+6,790,bw,30); exp.bezelStyle=NSBezelStyleRounded; [cv addSubview:exp];
 
-    // motor / output test buttons
+    /* Restart bridge: tears the USB session down gracefully (SIGTERM, so the
+       device is left clean) and brings it straight back. startBridge also clears
+       _connected, so the tester re-binds to the freshly published CoreMIDI
+       source rather than holding a stale endpoint. */
+    NSButton *rst=[NSButton buttonWithTitle:@"Restart bridge" target:self action:@selector(restart:)];
+    rst.frame=NSMakeRect(px,754,bw,28); rst.bezelStyle=NSBezelStyleRounded; [cv addSubview:rst];
+    NSButton *cal=[NSButton buttonWithTitle:@"Calibration…" target:self action:@selector(openCalibration:)];
+    cal.frame=NSMakeRect(px+bw+6,754,bw,28); cal.bezelStyle=NSBezelStyleRounded; [cv addSubview:cal];
+
+    NSTextField *tl=[NSTextField labelWithString:@"Output test:"]; tl.frame=NSMakeRect(px,732,pw,16);
+    tl.font=[NSFont systemFontOfSize:10]; tl.textColor=HEX(139,147,165,1); [cv addSubview:tl];
     NSArray *tests=@[@[@"Motor ▶",@"start"],@[@"Brake ■",@"brake"],@[@"45",@"r45"],@[@"33",@"r33"]];
     CGFloat tx=px;
     for(NSArray *t in tests){ NSButton *b=[NSButton buttonWithTitle:t[0] target:self action:@selector(testOut:)];
-        b.identifier=t[1]; b.frame=NSMakeRect(tx,526,72,28); b.bezelStyle=NSBezelStyleRounded; [cv addSubview:b]; tx+=76; }
-    NSTextField *tl=[NSTextField labelWithString:@"Output test:"]; tl.frame=NSMakeRect(px,556,pw,16);
-    tl.font=[NSFont systemFontOfSize:10]; tl.textColor=HEX(139,147,165,1); [cv addSubview:tl];
+        b.identifier=t[1]; b.frame=NSMakeRect(tx,700,72,28); b.bezelStyle=NSBezelStyleRounded;
+        [cv addSubview:b]; tx+=76; }
 
     _midiStat=[NSTextField labelWithString:@"MIDI: waiting for bridge…"];
-    _midiStat.frame=NSMakeRect(px,490,pw,18); _midiStat.font=[NSFont monospacedSystemFontOfSize:11 weight:NSFontWeightMedium];
+    _midiStat.frame=NSMakeRect(px,674,pw,18); _midiStat.font=[NSFont monospacedSystemFontOfSize:11 weight:NSFontWeightMedium];
     [cv addSubview:_midiStat]; [self updateMidiStat];
 
-    NSScrollView *sv=[[NSScrollView alloc] initWithFrame:NSMakeRect(px,16,pw,466)];
+    NSScrollView *sv=[[NSScrollView alloc] initWithFrame:NSMakeRect(px,16,pw,650)];
     sv.hasVerticalScroller=YES; sv.borderType=NSLineBorder; sv.autoresizingMask=NSViewHeightSizable|NSViewMinXMargin;
     _log=[[NSTextView alloc] initWithFrame:sv.bounds]; _log.editable=NO; _log.drawsBackground=YES;
     _log.backgroundColor=HEX(10,13,19,1); _log.textContainerInset=NSMakeSize(6,6);
     sv.documentView=_log; [cv addSubview:sv];
-
-    NSButton *cal=[NSButton buttonWithTitle:@"Calibration…" target:self action:@selector(openCalibration:)];
-    cal.frame=NSMakeRect(px+156,526,pw-156,28); cal.bezelStyle=NSBezelStyleRounded; [cv addSubview:cal];
 
     [_tester makeKeyAndOrderFront:nil];
     [NSApp activateIgnoringOtherApps:YES];
@@ -485,11 +765,35 @@ static void MIDIReadCB(const MIDIPacketList *pl, void *a, void *b) {
     [a addButtonWithTitle:@"Done"]; [a runModal];
 }
 
+/* Diagnostic trace of the CoreMIDI receive path, appended to /tmp/openv7_gui.log
+   alongside the bridge's own /tmp/openv7_bridge.log. The bridge can be verified
+   from a terminal, but the GUI's half of the link (did the port actually bind?
+   is MIDIReadCB firing?) is otherwise invisible, and "nothing is showing up" is
+   the one bug report this app is most likely to get. Cheap: one line per 3 s. */
+- (void)logDiag {
+    NSMutableString *names=[NSMutableString string];
+    ItemCount ns=MIDIGetNumberOfSources();
+    for(ItemCount i=0;i<ns;i++){
+        CFStringRef dn=NULL;
+        MIDIObjectGetStringProperty(MIDIGetSource(i),kMIDIPropertyDisplayName,&dn);
+        if(dn){ [names appendFormat:@"%@%@",names.length?@",":@"",(__bridge NSString*)dn]; CFRelease(dn); }
+    }
+    NSString *line=[NSString stringWithFormat:
+        @"bridge=%d connected=%d rxCount=%ld testerVisible=%d inPort=%u src=%lu [%@]\n",
+        [self bridgeRunning]?1:0, _connected?1:0, g_rxcount,
+        _tester.isVisible?1:0, (unsigned)_inPort, (unsigned long)ns, names];
+    NSFileHandle *fh=[NSFileHandle fileHandleForWritingAtPath:@"/tmp/openv7_gui.log"];
+    if(!fh){ [[NSFileManager defaultManager] createFileAtPath:@"/tmp/openv7_gui.log" contents:nil attributes:nil];
+             fh=[NSFileHandle fileHandleForWritingAtPath:@"/tmp/openv7_gui.log"]; }
+    if(fh){ [fh seekToEndOfFile]; [fh writeData:[line dataUsingEncoding:NSUTF8StringEncoding]]; [fh closeFile]; }
+}
+
 // ---- menu bar ----
 - (void)tick {
     if(![self bridgeRunning]) [self startBridge];   // relaunch if it exited
     if(!_connected) [self connectMIDI];
     [self refresh];
+    [self logDiag];
 }
 - (void)refresh {
     BOOL up=[self bridgeRunning];

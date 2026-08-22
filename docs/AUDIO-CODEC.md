@@ -49,11 +49,25 @@ input frame size is **exactly** Ozzy's `PLOYTEC_IN_FRAME_SIZE` of 64 bytes.
 
 From the URB structure in the capture:
 
-- **40 isochronous packets per URB**, 2640 bytes total, ~400 URBs/s.
+- **40 isochronous packets per URB**, typically 2640 bytes total, **200 URBs/s**.
+  (An earlier revision of this line said "~400 URBs/s". That contradicts the
+  529,303 B/s in the table above — 400 × 2640 = 1,056,000 B/s. 200 URBs/s is the
+  self-consistent figure: 40 × 200 = 8000 packets/s = exactly one per 125 µs
+  microframe, and 2640 × 200 = 528,000 B/s.)
 - Individual packet sizes **alternate `0x48` (72 B) and `0x3C` (60 B)**.
 - At 12 bytes per audio frame (4 ch × 3 B) that is **6 and 5 audio frames**
   alternating — averaging 5.5 frames per 125 µs microframe, i.e. ~44.1 kHz
   (the exact ratio is 44100/8000 = 5.5125).
+- ⚠️ **The alternation is not strict, and this matters.** A perfect 6/5/6/5
+  averages 5.5 frames = **44,000 Hz — 0.23 % slow**, and yields 528,000 B/s.
+  But the capture measured **529,303 B/s**, i.e. 0.02 % from theory. Only a
+  *fractional* pattern reaches that number: carrying the 0.0125 remainder gives
+  4100 packets of 72 B and 3900 of 60 B per second = **exactly 44,100 frames and
+  529,200 B/s** (0.019 % from the measurement — matching it, where strict
+  alternation is 10× further away). The occasional extra 6-frame packet also
+  means the URB is sometimes **2652 bytes**, not always 2640, so a receiver must
+  size for the worst case (40 × 72 = 2880 B) rather than assume a fixed URB.
+  OpenV7 implements this as an accumulator in `iso_pace()` (`src/main.c`).
 - `wMaxPacketSize` is 156, so the endpoint has headroom; the driver does **not**
   fill it.
 

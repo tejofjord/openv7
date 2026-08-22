@@ -11,7 +11,47 @@ full detail. This file is the short version plus what to do next.
 
 ---
 
-## 1. Do this first: fix the isochronous pacing
+## 1. ✅ DONE — isochronous pacing fixed and measured on hardware
+
+> **Status: implemented in `src/main.c` (`iso_pace()`) and verified on the real
+> V7.** 75 s continuous run, both workarounds disabled: iso-OUT held **200/s**
+> and iso-IN **62/s**, dead steady, no stall, clean shutdown. The rate on the
+> wire is now 44,100 frames/s exactly (529,200 B/s) against the vendor driver's
+> measured 529,303 B/s.
+>
+> Two refinements to what was written below, both measured:
+> - The alternation is **not strict**. A perfect 6/5 averages 5.5 frames =
+>   44,000 Hz, 0.23 % slow, and gives 528,000 B/s — 10× further from the capture
+>   than the accumulator, which lands on 529,200. The fractional remainder is
+>   carried instead; the URB is therefore sometimes 2652 B, not always 2640.
+> - `~400 URBs/s` in AUDIO-CODEC.md was wrong and self-contradictory
+>   (400 × 2640 = 1,056,000 B/s ≠ 529,303). It is **200 URBs/s**. Corrected there.
+>
+> ⚠️ **REVERSED — the keepalives are back ON by default.** The 75 s and 120 s
+> runs below did survive a long idle with both off, but that was over-concluded
+> from a handful of runs: every one of them touched the deck within ~10 s of
+> arming, so none actually exercised a long cold idle before the first input. In
+> use the control stream then intermittently delivered **nothing at all** from
+> launch — zero bytes even to an independent CoreMIDI listener, while the bridge
+> logged a clean handshake. A 45 s-idle A/B failed to reproduce it in either
+> direction (no-keepalive 10,574 msgs, keepalive 20,193 msgs), so **the trigger
+> is still unknown** and restoring them is defensive, not a proven fix. Disable
+> with `--no-keepalive` only for A/B work, and only with a test that idles well
+> past 24 s before first input and repeats enough to catch an intermittent fault.
+>
+> The pacing fix itself is unaffected and still correct — it matches the vendor
+> driver's measured byte rate, which is true independently of this.
+>
+> **Still needs a human hand on the hardware:** the 75 s run proves the *iso*
+> stream survives, but the V7 is silent when idle, so it cannot prove the
+> *control* stream (bulk `0x83`) survives. Run `./openv7 --diag -v`, leave it
+> untouched for 60 s, **then spin the platter**. Frames appearing = the overfeed
+> was the root cause and both workarounds stay deleted. Nothing appearing =
+> re-run with `--legacy-keepalive` and the real cause is elsewhere.
+>
+> Partial corroboration already in hand: `B0 7D` / `B0 6E` appeared **only once
+> at startup** and never again across 75 s. That confirms the prediction below —
+> the "heartbeat" was a response to the re-arm, not something the V7 volunteers.
 
 **This is the only open item that fixes a bug rather than documenting a fact,
 and it is the prime suspect for the long-idle stall.**
@@ -50,6 +90,12 @@ overrun:
 idle with both removed. If it does, the root cause is confirmed and two hacks
 delete themselves. If it does not, the pacing is still correct — it now matches
 the vendor driver — and the real cause is elsewhere.
+
+> **How this was actually done:** both workarounds are **disabled by default but
+> not deleted** — they are gated behind `--legacy-keepalive`. They are the
+> control arm of the experiment above, so removing them outright would destroy
+> the ability to A/B the very prediction this section asks for. Delete them once
+> the platter test passes.
 
 A third prediction falls out: the `B0 7D` / `B0 6E` "heartbeat" the old notes
 described should **stop appearing**, because the V7 emits nothing at all when

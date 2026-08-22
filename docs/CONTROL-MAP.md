@@ -55,13 +55,60 @@ Continuous controls use the standard MIDI 14-bit convention — **coarse on CC
 | `0x46` | `0x4E` | **Motor START TIME knob** | ✅ |
 | `0x47` | `0x4F` | **Motor STOP TIME knob** | ✅ |
 | `0x44` | — | **Browse / track select knob** | ✅ |
-| `0x56`, `0x58` | | FX parameter | `0x58` ✅ · `0x56` 🔬 |
+| `0x56`, `0x58` | | FX parameter — ⚠️ **RELATIVE**, not absolute | `0x58` ✅ measured |
 | `0x57` + `0x77` | `0x59` + `0x79` | FX slider (coarse + fine) | ✅ |
-| `0x5A`, `0x5B` | | FX select | ✅ |
+| `0x5A`, `0x5B` | | FX select — ⚠️ **RELATIVE**; `0x5B` seen on the wire | ✅ |
 
 Each platter position message is paired 1:1 with a `0xE0` pitch-bend carrying a
 14-bit timestamp on a **2,822,400 Hz** clock ✅ — that pairing is what yields
 velocity. A stationary platter sends nothing at all ✅.
+
+> ### ✅ Library buttons resolved — PREPARE / FILES / CRATES
+>
+> These were recorded here as a cluster with "individual assignment unconfirmed".
+> Pressing each in turn through the bridge gave one distinct note per button:
+>
+> | Note | Button |
+> |---|---|
+> | `0x09` | **PREPARE** |
+> | `0x0A` | **FILES** |
+> | `0x0B` | **CRATES** |
+>
+> Note this is **not** the panel's left-to-right order (CRATES, PREPARE, FILES),
+> so assigning these by position — the obvious guess, and the one made first —
+> gets all three wrong.
+>
+> **Independently corroborated by the LED map.** The camera probe on Windows
+> found the output trio `0x03`/`0x04`/`0x05` to be PREPARE / FILES / CRATES, in
+> that same ascending order. Two unrelated methods — photographing lamps on
+> Windows, and reading note-ons on macOS — agree on the ordering.
+
+> ### ✅ Knob presses and encoder behaviour — measured on macOS
+>
+> Captured from the live device through the OpenV7 bridge (`openv7 -v`):
+>
+> | Address | Control | Evidence |
+> |---|---|---|
+> | note `0x08` | **BROWSE knob PRESS** | `90 08 7F` / `90 08 00`, seven press/release pairs |
+> | note `0x5A` | **FX SELECT knob PRESS** | `90 5A 7F` / `90 5A 00` |
+> | CC `0x5B` | **FX SELECT rotation** | 16 consecutive `01` turning one way |
+> | CC `0x58` | **FX PARAM rotation** | `7F 7F 7F … 01 01 01` |
+>
+> This resolves `0x08`, previously recorded here only as "not LOAD PREPARE" with
+> its panel label unknown, and listed as an open question in HANDOFF-MAC.md.
+>
+> **FX PARAM is a relative encoder, not an absolute knob.** It sends `0x01` /
+> `0x7F` for direction exactly as BROWSE and FX SELECT do — no position, no
+> centre, no end stops. The earlier entry implied a 0..127 knob; a host that
+> renders it as one pegs the indicator at an end and it never moves. The deck's
+> three relative encoders are BROWSE (`0x44`), FX SELECT (`0x5B`) and FX PARAM
+> (`0x58`).
+>
+> ⚠️ **Open:** in the same capture CC `0x00` arrived 102 times with a constant
+> value `02`, and CC `0x01` 33 times with a constant `00`. Constant values are
+> neither position nor relative-encoder data. A deck switch to A (`B0 7D 00`)
+> during that capture explains why the deck-A block appeared at all, but not the
+> constant values. Unexplained; not chased.
 
 > ⚠️ **Input and output CC numbers overlap and do not mean the same thing.**
 > Input CC `0x45` is the deck-A strip search; output CC `0x45` is motor RPM
@@ -115,9 +162,9 @@ Non-deck buttons:
 | Note | Mixxx key | Likely control |
 |---|---|---|
 | `0x06` / `0x07` | `SelectPrev/NextPlaylist` | BACK / FWD (browse) |
-| `0x08` | `LoadSelectedIntoFirstStopped` | ⚠️ **not** LOAD PREPARE — see below |
+| `0x08` | `LoadSelectedIntoFirstStopped` | ✅ **BROWSE knob PRESS** — measured on the Mac |
 | `0x0D` | `LoadSelectedIntoFirstStopped` | **LOAD PREPARE** ✅ confirmed by pressing it |
-| `0x09`, `0x0A`, `0x0B` | *(absent from the Mixxx map)* | library buttons — CRATES / PREPARE / FILES, individual assignment unconfirmed |
+| `0x09` / `0x0A` / `0x0B` | *(absent from the Mixxx map)* | ✅ **PREPARE / FILES / CRATES** — measured individually, see below |
 | `0x0C` / `0x0E` | `LoadSelectedTrack` ch1 / ch2 | LOAD A / LOAD B |
 | `0x52` / `0x59` | `flanger` ch1 / ch2 | FX ON A / B |
 | `0x53` / `0x5A` | `FxSelect` | FX SELECT |

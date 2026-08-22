@@ -45,6 +45,26 @@ static volatile sig_atomic_t g_quit = 0;
 static int g_verbose = 0;
 static int g_learn   = 0;
 static int g_diag    = 0;   /* --diag: print iso streaming rates once a second */
+/* Control-stream keepalives: the 25 ms 0xFD frame on bulk 0x04 and the 2 s EP0
+   'I' re-arm. ON by default; --no-keepalive disables them.
+
+   HISTORY, because this flipped twice and the reasoning matters:
+   The vendor driver uses NEITHER, and both were originally added to stop the
+   control stream dying at ~24 s -- which looked like compensation for the 2.36x
+   iso overfeed since fixed. A 120 s run with both off survived a 54 s idle, so
+   they were disabled. That was over-concluded from ONE run: every test that
+   "proved" it happened to touch the deck within ~10 s of arming, so none of them
+   actually exercised a long cold idle before first input.
+
+   In use the stream then intermittently delivered NOTHING from launch -- zero
+   bytes even to an independent CoreMIDI listener, with a clean handshake. A
+   45 s-idle A/B did not reproduce it either way, so the trigger is still
+   UNKNOWN and this is defensive, not a proven fix. They cost one EP0 round trip
+   per 2 s and one 42-byte frame per 25 ms, and the arm that had them ran fine,
+   so the safe default is on. Do not turn this off again without a test that
+   idles well past 24 s before the first input, repeated enough to catch an
+   intermittent fault. */
+static int g_keepalive = 1;
 
 /* ---- learn mode: catalog each distinct control as it's touched ---- */
 struct cat_entry { int key; uint8_t status, d0, vmin, vmax; long count; };
@@ -92,14 +112,56 @@ static void learn_dump(void) {
                 g_cat[i].count, ctrl_label(g_cat[i].status, g_cat[i].d0));
 }
 
-#define ISO_NPKT   16
+/* Packets per URB. These differ per endpoint because the two endpoints are
+   serviced at different intervals:
+     iso-OUT 0x02 — once per 125 us MICROFRAME (8000/s). The vendor driver uses
+                    40 packets/URB, i.e. 200 URBs/s. (AUDIO-CODEC.md says
+                    "~400 URBs/s", which contradicts the 529,303 B/s in its own
+                    table: 400 x 2640 = 1,056,000 B/s. 200 is the self-consistent
+                    figure and is what the byte rate actually implies.)
+     iso-IN  0x81 — once per 1 ms FRAME (1000/s). 16 packets/URB => ~62 URBs/s,
+                    which is exactly the rate --diag has always reported healthy,
+                    so this one is left alone: it is measured-good as it stands. */
+#define ISO_NPKT_OUT  40
+#define ISO_NPKT_IN   16
 /* 16 iso transfers in flight (~32 ms of queued output at 8000 packets/s), NOT 4.
    With a shallow queue any scheduling hiccup empties it, the V7 sees a gap in
    its playback clock, and it drops the whole stream — controls included — after
    a while ("goes quiet"). A deep queue absorbs the hiccups. Proven on hardware:
    4 transfers crashed iso-OUT to 0 within ~9 s under load; 16 held a steady
-   500/62 indefinitely. */
+   500/62 indefinitely. That proof is about queue depth in TIME, not in transfer
+   count: 16 x 16 packets = 32 ms. With 40-packet URBs the same 16 transfers now
+   buy 80 ms, so resilience strictly increases. Latency does not matter while the
+   stream is silence; shrink this to ~8 when real PCM starts being written. */
 #define ISO_NXFER  16
+
+/* ---- iso-OUT pacing ------------------------------------------------------
+   Hold a true 44.1 kHz by carrying the fractional remainder rather than
+   alternating 6/5 blindly (see the NOTE in ploytec.h: strict alternation is
+   44,000 Hz, 0.23 % slow). Per packet: emit 5 frames, add 44100 % 8000 = 4100
+   to the accumulator, and promote to 6 frames whenever it passes 8000. Over any
+   80 packets this sums to exactly 441 frames = 44,100 Hz by construction.
+
+   The accumulator is deliberately GLOBAL across all in-flight transfers: it is
+   the aggregate rate on the wire that has to be 44.1 kHz, not the rate of any
+   one URB. Seeded so the first packet is a 72 like the capture's. */
+#define ISO_ACC_STEP  (V7_SAMPLE_RATE % V7_ISO_PKTS_PER_SEC)   /* 4100 */
+static unsigned g_iso_acc = ISO_ACC_STEP;
+
+/* Set this transfer's per-packet lengths from the accumulator and resize it to
+   match. The payload stays all-zero (silence), so only the LENGTHS move. */
+static void iso_pace(struct libusb_transfer *t) {
+    int total = 0;
+    for (int i = 0; i < t->num_iso_packets; i++) {
+        int frames = V7_ISO_FRAMES_MIN;
+        g_iso_acc += ISO_ACC_STEP;
+        if (g_iso_acc >= V7_ISO_PKTS_PER_SEC) { frames = V7_ISO_FRAMES_MAX; g_iso_acc -= V7_ISO_PKTS_PER_SEC; }
+        int len = frames * V7_ISO_FRAME_BYTES;          /* 60 or 72 */
+        t->iso_packet_desc[i].length = len;
+        total += len;
+    }
+    t->length = total;                                   /* libusb packs packets contiguously */
+}
 
 /* ---- outgoing (app -> device) frame queue ---- */
 #define OUTQ 512
@@ -225,6 +287,12 @@ static void ploytec_rearm(void) {
     if (libusb_submit_transfer(rt) != 0) { free(rb); libusb_free_transfer(rt); }
 }
 
+/* bulk-IN watchdog state (definition of arm_bulk is further down) */
+static struct libusb_transfer *g_t_in = NULL, *g_t_aux = NULL;
+static int g_in_live = 0, g_aux_live = 0;
+static long g_ctrl_bytes = 0;          /* control-IN traffic, for --diag */
+static void arm_bulk(struct libusb_transfer *t, int *live, unsigned char ep, const char *name);
+
 /* ---- streaming-health counters (for the --diag rate report) ---- */
 static long g_isoout_cmpl = 0, g_isoin_cmpl = 0;
 
@@ -232,11 +300,16 @@ static long g_isoout_cmpl = 0, g_isoin_cmpl = 0;
 static void LIBUSB_CALL iso_cb(struct libusb_transfer *t) {
     if (t->status == LIBUSB_TRANSFER_NO_DEVICE) { g_quit = 1; return; }  /* unplugged */
     g_isoout_cmpl++;
-    if (!g_quit) libusb_submit_transfer(t);           /* silence buffer already zero */
+    /* Re-pace before every resubmit: the packet lengths are what hold 44.1 kHz,
+       and the accumulator has to keep advancing across resubmissions or the
+       fractional 0.0125 frame/packet is lost and the stream drifts slow. */
+    if (!g_quit) { iso_pace(t); libusb_submit_transfer(t); }   /* silence buffer already zero */
 }
 static void LIBUSB_CALL drain_cb(struct libusb_transfer *t) {
+    g_aux_live = 0;
     if (t->status == LIBUSB_TRANSFER_NO_DEVICE) { g_quit = 1; return; }
-    if (!g_quit) libusb_submit_transfer(t);           /* discard audio-return */
+    if (t->status == LIBUSB_TRANSFER_STALL) libusb_clear_halt(g_dev, V7_EP_AUX_IN);
+    if (!g_quit) arm_bulk(t, &g_aux_live, V7_EP_AUX_IN, "aux-drain");  /* discard audio-return */
 }
 static void LIBUSB_CALL isoin_cb(struct libusb_transfer *t) {
     if (t->status == LIBUSB_TRANSFER_NO_DEVICE) { g_quit = 1; return; }
@@ -250,7 +323,9 @@ static void LIBUSB_CALL out_cb(struct libusb_transfer *t) {
 }
 static struct midi_split g_in;                        /* device-side parser state */
 static void LIBUSB_CALL ctrl_in_cb(struct libusb_transfer *t) {
+    g_in_live = 0;                                     /* no longer in flight */
     if (t->status == LIBUSB_TRANSFER_COMPLETED) {
+        g_ctrl_bytes += t->actual_length;
         uint8_t out[3];
         for (int i = 0; i < t->actual_length; i++) {
             int n = midi_feed(&g_in, t->buffer[i], out);
@@ -266,7 +341,33 @@ static void LIBUSB_CALL ctrl_in_cb(struct libusb_transfer *t) {
         }
     }
     if (t->status == LIBUSB_TRANSFER_NO_DEVICE) { g_quit = 1; return; }
-    if (!g_quit) libusb_submit_transfer(t);
+    if (t->status == LIBUSB_TRANSFER_STALL) libusb_clear_halt(g_dev, V7_EP_CTRL_IN);
+    if (!g_quit) arm_bulk(t, &g_in_live, V7_EP_CTRL_IN, "control-IN");
+}
+
+/* ---- bulk-IN re-arm watchdog -------------------------------------------
+   ROOT CAUSE of "the GUI registers nothing, but a bridge restart fixes it":
+   both bulk-IN pipes were submitted with the return value DISCARDED, at startup
+   and on every resubmit. libusb_submit_transfer can fail transiently, and when
+   it did the pipe was simply never re-armed -- for the life of the process. The
+   bridge went on logging "running" and streaming iso at full rate (the audio
+   clock is a separate set of transfers), so from outside everything looked
+   healthy while the control endpoint was silently dead. Intermittent, because
+   it depends on whether that one submit happened to fail.
+
+   Now every submit is checked, a STALL clears the halt first, and the main loop
+   re-arms anything not in flight, so the pipe self-heals instead of dying. */
+static void arm_bulk(struct libusb_transfer *t, int *live, unsigned char ep, const char *name) {
+    if (g_quit || !t || *live) return;
+    int r = libusb_submit_transfer(t);
+    if (r == 0) { *live = 1; return; }
+    if (r == LIBUSB_ERROR_PIPE) libusb_clear_halt(g_dev, ep);
+    static time_t last_gripe;           /* don't spam the log on a persistent fault */
+    time_t now = time(NULL);
+    if (now != last_gripe) {
+        fprintf(stderr, "OpenV7: %s submit failed (%s) — retrying\n", name, libusb_error_name(r));
+        last_gripe = now;
+    }
 }
 
 /* submit one queued outgoing frame to the device (fire-and-forget) */
@@ -285,12 +386,18 @@ int main(int argc, char **argv) {
         if (!strcmp(argv[i], "-v") || !strcmp(argv[i], "--verbose")) g_verbose = 1;
         else if (!strcmp(argv[i], "--learn")) g_learn = 1;
         else if (!strcmp(argv[i], "--diag")) g_diag = 1;
+        else if (!strcmp(argv[i], "--no-keepalive")) g_keepalive = 0;
         else if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help")) {
             printf("OpenV7 — Numark V7 userspace driver\n"
                    "usage: openv7 [-v|--verbose] [--learn] [--diag]\n"
                    "  -v        print decoded MIDI as it arrives\n"
                    "  --learn   catalog each control once (touch every control, Ctrl-C for the map)\n"
-                   "  --diag    print isochronous stream health once a second (~500/~62 = healthy)\n");
+                   "  --diag    print isochronous stream health once a second (~200/~62 = healthy)\n"
+                   "  --no-keepalive\n"
+                   "            disable the control-stream keepalives (25 ms 0xFD frame on bulk\n"
+                   "            0x04 + 2 s EP0 re-arm). They are ON by default: without them the\n"
+                   "            control stream has been seen to deliver nothing at all from\n"
+                   "            launch. Only for A/B testing that fault.\n");
             return 0;
         }
     }
@@ -342,21 +449,25 @@ int main(int argc, char **argv) {
     /* iso-OUT audio clock (silence) */
     struct libusb_transfer *iso[ISO_NXFER];
     for (int i = 0; i < ISO_NXFER; i++) {
-        unsigned char *b = calloc(1, V7_ISO_PKT_SIZE * ISO_NPKT);
-        iso[i] = libusb_alloc_transfer(ISO_NPKT);
+        /* Allocate for the WORST case (all 72 B packets) and never touch the
+           bytes again — silence is zeros, and iso_pace() only moves the lengths.
+           NOT V7_ISO_PKT_SIZE (156): that is the endpoint ceiling, not the
+           amount the device is fed. */
+        unsigned char *b = calloc(1, V7_ISO_PKT_MAX * ISO_NPKT_OUT);
+        iso[i] = libusb_alloc_transfer(ISO_NPKT_OUT);
         libusb_fill_iso_transfer(iso[i], g_dev, V7_EP_AUDIO_OUT, b,
-                                 V7_ISO_PKT_SIZE * ISO_NPKT, ISO_NPKT, iso_cb, NULL, 1000);
-        libusb_set_iso_packet_lengths(iso[i], V7_ISO_PKT_SIZE);
+                                 V7_ISO_PKT_MAX * ISO_NPKT_OUT, ISO_NPKT_OUT, iso_cb, NULL, 1000);
+        iso_pace(iso[i]);                              /* sets per-packet lengths + t->length */
         libusb_submit_transfer(iso[i]);
     }
     /* iso-IN: the device stalls its control stream unless this endpoint is
        actively drained — the fix for "controls only report at startup". */
     struct libusb_transfer *isoin[ISO_NXFER];
     for (int i = 0; i < ISO_NXFER; i++) {
-        unsigned char *b = calloc(1, V7_ISO_IN_PKT_SIZE * ISO_NPKT);
-        isoin[i] = libusb_alloc_transfer(ISO_NPKT);
+        unsigned char *b = calloc(1, V7_ISO_IN_PKT_SIZE * ISO_NPKT_IN);
+        isoin[i] = libusb_alloc_transfer(ISO_NPKT_IN);
         libusb_fill_iso_transfer(isoin[i], g_dev, V7_EP_AUDIO_IN, b,
-                                 V7_ISO_IN_PKT_SIZE * ISO_NPKT, ISO_NPKT, isoin_cb, NULL, 1000);
+                                 V7_ISO_IN_PKT_SIZE * ISO_NPKT_IN, ISO_NPKT_IN, isoin_cb, NULL, 1000);
         libusb_set_iso_packet_lengths(isoin[i], V7_ISO_IN_PKT_SIZE);
         libusb_submit_transfer(isoin[i]);
     }
@@ -366,8 +477,9 @@ int main(int argc, char **argv) {
     struct libusb_transfer *t_aux = libusb_alloc_transfer(0);
     libusb_fill_bulk_transfer(t_in,  g_dev, V7_EP_CTRL_IN, cin, sizeof cin, ctrl_in_cb, NULL, 0);
     libusb_fill_bulk_transfer(t_aux, g_dev, V7_EP_AUX_IN,  aux, sizeof aux, drain_cb,   NULL, 0);
-    libusb_submit_transfer(t_in);
-    libusb_submit_transfer(t_aux);
+    g_t_in = t_in; g_t_aux = t_aux;
+    arm_bulk(t_in,  &g_in_live,  V7_EP_CTRL_IN, "control-IN");
+    arm_bulk(t_aux, &g_aux_live, V7_EP_AUX_IN,  "aux-drain");
 
     if (g_learn)
         fprintf(stderr, "OpenV7: LEARN mode — touch every control once, then Ctrl-C for the map.\n");
@@ -380,9 +492,15 @@ int main(int argc, char **argv) {
     while (!g_quit) {
         struct timeval tv = { 0, 20000 };
         libusb_handle_events_timeout(g_ctx, &tv);
-        /* EP0 status re-arm, every 2 s (secondary keepalive). */
-        { time_t now = time(NULL);
+        /* EP0 status re-arm, every 2 s (secondary keepalive) — legacy only. */
+        if (g_keepalive) { time_t now = time(NULL);
           if (now - rearm_t >= 2) { ploytec_rearm(); rearm_t = now; } }
+        /* Watchdog: re-arm either bulk-IN pipe if it is not in flight. Without
+           this a single failed submit silently kills the control stream for the
+           whole session -- the fault that presented as "the GUI registers
+           nothing until you restart the bridge". No-op when both are live. */
+        arm_bulk(g_t_in,  &g_in_live,  V7_EP_CTRL_IN, "control-IN");
+        arm_bulk(g_t_aux, &g_aux_live, V7_EP_AUX_IN,  "aux-drain");
         /* drain outgoing MIDI to the device */
         int sent_real = 0;
         pthread_mutex_lock(&outq_mtx);
@@ -401,18 +519,22 @@ int main(int argc, char **argv) {
            with it, it survives pauses and streams indefinitely. */
         gettimeofday(&tvn, NULL); long nowms = tvn.tv_sec*1000 + tvn.tv_usec/1000;
         if (sent_real) ka04_ms = nowms;
-        else if (nowms - ka04_ms >= 25) { submit_out(idle_frame); ka04_ms = nowms; }
+        else if (g_keepalive && nowms - ka04_ms >= 25) { submit_out(idle_frame); ka04_ms = nowms; }
         /* --diag: report iso completion rates once per WALL-CLOCK second. This
            MUST be time-gated, not iteration-gated: the loop spins ~500×/s, so an
            iteration counter fires the (unbuffered) fprintf ~10×/s, and that log
            I/O stalls the event loop enough to underrun the stream — the report
-           would then measure its own interference. Healthy: ~500 iso-out/s,
-           ~62 iso-in/s. */
+           would then measure its own interference.
+
+           Healthy: ~200 iso-out/s, ~62 iso-in/s. iso-out WAS ~500/s before the
+           pacing fix — 8000 packets/s over 16-packet URBs. It is now 8000 over
+           40-packet URBs = 200. A drop from 500 to 200 here is the fix working,
+           not a regression; the packet rate on the wire is identical. */
         if (g_diag) {
             time_t now = time(NULL);
             if (now != diag_t) {
-                fprintf(stderr, "  [diag] iso-out/s=%ld iso-in/s=%ld\n",
-                        g_isoout_cmpl - diag_o0, g_isoin_cmpl - diag_i0);
+                fprintf(stderr, "  [diag] iso-out/s=%ld iso-in/s=%ld  ctrl-bytes=%ld in-live=%d  (healthy: ~200/~62)\n",
+                        g_isoout_cmpl - diag_o0, g_isoin_cmpl - diag_i0, g_ctrl_bytes, g_in_live);
                 diag_o0 = g_isoout_cmpl; diag_i0 = g_isoin_cmpl; diag_t = now;
             }
         }
