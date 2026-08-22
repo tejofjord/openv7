@@ -297,6 +297,48 @@ address block. That is the only occasion on which the V7 volunteers control
 state without the control being moved, and it is how a host can learn fader and
 knob positions at startup.
 
+### ⚠️ Output must follow the switch
+
+**The device ignores the non-selected deck's block entirely.** This is measured,
+not inferred: with the switch on B, `B0 43 00` (deck-A soft start) produced
+**zero** messages and no motion, while `B0 4D 00` spun the platter immediately.
+
+So a bridge must track `B0 7D` and address **motor and LED commands to whichever
+block is currently live**:
+
+| | Deck A | Deck B |
+|---|---|---|
+| Motor | `0x41`–`0x49` (+`0x69`) | `0x4B`–`0x53` (+`0x73`) |
+| LEDs | `0x07`–`0x1C` | `0x1D`–`0x33` |
+
+Send to the wrong block and the device **silently does nothing** — no error, no
+stall, just no effect. That failure mode is easy to misread as a broken command
+or a dead pipe.
+
+### Driving four virtual decks
+
+The V7 has one deck-select switch, but a host can map four decks by combining it
+with the DELETE/SHIFT modifier:
+
+| Switch (`B0 7D`) | Modifier | Virtual deck |
+|---|---|---|
+| `00` (A) | — | 1 |
+| `00` (A) | SHIFT held | 3 |
+| `01` (B) | — | 2 |
+| `01` (B) | SHIFT held | 4 |
+
+Two protocol features make this workable rather than a hack:
+
+- **`B0 7D` announces the switch position** the moment it changes, so the host
+  never has to guess which deck is live.
+- **The state dump on switch-flip enables soft takeover.** Because the device
+  re-reports every continuous control's current position in the new block,
+  the host can reconcile physical positions with the newly selected deck instead
+  of snapping the pitch fader to wherever the hardware happens to sit.
+
+The limit is physical, not protocol: one platter and one pitch fader means four
+*mappable targets you switch between*, not four you can operate at once.
+
 ### `0x12` / `0x33` is the DELETE button, not "SHIFT"
 
 The Mixxx mapping names these `Shift`. On the V7's panel the button is labelled
