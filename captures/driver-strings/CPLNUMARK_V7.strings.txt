@@ -1,0 +1,1054 @@
+﻿                          
+                                 H
+         (((((                  H
+         h((((                  H
+        <requestedExecutionLevel level="asInvoker" uiAccess="false"></requestedExecutionLevel>
+      </requestedPrivileges>
+      <requestedPrivileges>
+    </security>
+    <security>
+  </trustInfo>
+  <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
+ !"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\]^_`abcdefghijklmnopqrstuvwxyz{|}~
+ !"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\]^_`ABCDEFGHIJKLMNOPQRSTUVWXYZ{|}~
+ !"#$%&'()*+,-./0123456789:;<=>?@abcdefghijklmnopqrstuvwxyz[\]^_`abcdefghijklmnopqrstuvwxyz{|}~
+- Attempt to initialize the CRT more than once.
+- Attempt to use MSIL code from this assembly during native code initialization
+ Base Class Array'
+ Base Class Descriptor at (
+ Class Hierarchy Descriptor'
+ Complete Object Locator'
+- CRT not initialized
+ Data: <%s> %s
+ delete
+ delete[]
+- floating point support not loaded
+' is being used without being initialized.
+ new[]
+- not enough space for _onexit/atexit table
+- not enough space for arguments
+- not enough space for environment
+- not enough space for locale information
+- not enough space for lowio initialization
+- not enough space for stdio initialization
+- not enough space for thread data
+- pure virtual function call
+ Type Descriptor'
+ Unable to display RTC Message.
+- unable to initialize heap
+- unable to open console device
+- unexpected heap error
+- unexpected multithread lock error
+' was corrupted.
+!This program cannot be run in DOS mode.
+"http://crl.globalsign.net/root.crl0
+#File Error#(%d) : 
+$fclose
+$Ncbbbbbbbbb
+%.2X 
+%hs located at 0x%p is %Iu bytes long.
+%hs(%d) : 
+%s(%d) : %s
+%tttttttttttttttttt
+%tttttttttttttttttttttttttttttttttttttttttt%
+&/&/!Ouuuuuuuuuuuuuuuuuuu
+&;;;;;;;;;;&
+&0$0"
+&https://www.globalsign.com/repository/0
+&https://www.globalsign.com/repository/03
+&tttttttttttttttttttttttttttttt&
+&tttttttttttttttttttttttttttttttttttt&
+( (_Stream->_flag & _IOSTRG) || ( fn = _fileno(_Stream), ( (_textmode_safe(fn) == __IOINFO_TM_ANSI) && !_tm_unicode_safe(fn))))
+( 8PX
+("Buffer too small", 0)
+("Corrupted pointer passed to _freea", 0)
+("inconsistent IOB fields", stream->_ptr - stream->_base >= 0)
+("Incorrect format specifier", 0)
+("Invalid error_mode", 0)
+("Invalid file descriptor. File possibly closed by a different thread",0)
+("Invalid signal or error", 0)
+("'n' format specifier disabled", 0)
+(((_Path))) != NULL
+(((_Src))) != NULL
+((_Dst)) != NULL && ((_SizeInBytes)) > 0
+((_Dst)) != NULL && ((_SizeInWords)) > 0
+((cnt & 1) == 0)
+((ptloci->lc_category[category].wlocale != NULL) && (ptloci->lc_category[category].wrefcount != NULL)) || ((ptloci->lc_category[category].wlocale == NULL) && (ptloci->lc_category[category].wrefcount == NULL))
+((state == ST_NORMAL) || (state == ST_TYPE))
+(*_errno())
+(_HEAP_MAXREQ / nNum) >= nSize
+(_osfile(fh) & FOPEN)
+(_osfile(filedes) & FOPEN)
+('8PW
+(buf != NULL)
+(ch != _T('\0'))
+(count == 0) || (string != NULL)
+(dst != NULL && sizeInBytes > 0) || (dst == NULL && sizeInBytes == 0)
+(fh >= 0 && (unsigned)fh < (unsigned)_nhandle)
+(filedes >= 0 && (unsigned)filedes < (unsigned)_nhandle)
+(fNewBits==_CRTDBG_REPORT_FLAG) || ((fNewBits & 0x0ffff & ~(_CRTDBG_ALLOC_MEM_DF | _CRTDBG_DELAY_FREE_MEM_DF | _CRTDBG_CHECK_ALWAYS_DF | _CRTDBG_CHECK_CRT_DF | _CRTDBG_LEAK_CHECK_DF) ) == 0)
+(format != NULL)
+(HcD$0Hk
+(HcL$0Hk
+(http://ocsp2.globalsign.com/gscodesigng20
+(L"Buffer is too small" && 0)
+(L"Invalid parameter", 0)
+(L"String is not null terminated" && 0)
+(LcD$@H
+(null)
+(Press Retry to debug the application)
+(pwcs == NULL && sizeInWords == 0) || (pwcs != NULL && sizeInWords > 0)
+(str != NULL)
+(stream != NULL)
+(string != NULL)
+(unsigned)(c + 1) <= 256
+*;;;;;;**;;;;;;*
+*;;;;;;;;;;;;;;*
+, Line 
+,0*0(
+.?AVbad_alloc@std@@
+.?AVbad_exception@std@@
+.?AVControlPanel@@
+.?AVexception@std@@
+.?AVtype_info@@
+.http://crl.thawte.com/ThawteTimestampingCA.crl0
+.pdata
+.text
+/eeee/
+/eeeeeeee/
+/Pz0G
+/V.?.
+;;;;;;;;
+;;;;;;;;;;
+;@aa&&&a
+;0ttttttttttttttt4
+;bbbbbbbbbbbbbbbbbbbbbb;
+;D$$u&H
+?bbpUcbbbbbbbbbbbbbbbbbbbbbbbbcUpbbb
+?pbbbbbbbbbbbbbbbbbp@X7bbbb
+?pbbbbbbbbbbbbp
+@ H9D$@v.H
+@(H9A(u
+@.data
+@.reloc
+@.rsrc
+@0>0<
+@0Hc@
+@0HcH
+@SUWATAUAVAWH
+\$XE3
+\vnO^
+]jxdE
+^kuuuuuuuuuka
+^uuukMOuuuuuuuuuuuuuuuuuuuuuuuuO
+__based(
+__cdecl
+__clrcall
+__crtMessageWindowA
+__crtMessageWindowW
+__fastcall
+__pascal
+__ptr64
+__restrict
+__stdcall
+__thiscall
+__unaligned
+_BLOCK_TYPE_IS_VALID(pHead->nBlockUse)
+_calloc_dbg_impl
+_close
+_commit
+_CrtCheckMemory()
+_CrtDbgReport: String too long or Invalid characters in String
+_CrtDbgReport: String too long or IO Error
+_CrtIsValidHeapPointer(pUserData)
+_CrtMemCheckpoint
+_CrtSetDbgFlag
+_expand_base
+_fclose_nolock
+_fileno
+_get_osfhandle
+_heapchk fails with _HEAPBADBEGIN.
+_heapchk fails with _HEAPBADEND.
+_heapchk fails with _HEAPBADNODE.
+_heapchk fails with _HEAPBADPTR.
+_heapchk fails with unknown return value!
+_isatty
+_itoa_s(nLine, szLineMessage, 4096, 10)
+_itow_s(nLine, szLineMessage, 4096, 10)
+_loc_update.GetLocaleT()->locinfo->mb_cur_max == 1 || _loc_update.GetLocaleT()->locinfo->mb_cur_max == 2
+_lseeki64
+_mbstowcs_l_helper
+_mbstowcs_s_l
+_msize_dbg
+_NMSG_WRITE
+_output_s_l
+_pFirstBlock == pHead
+_pFirstBlock == pOldBlock
+_pLastBlock == pHead
+_pLastBlock == pOldBlock
+_printMemBlockData
+_set_error_mode
+_setenvp
+_swprintf
+_VCrtDbgReportA
+_VCrtDbgReportW
+_vsnprintf_helper
+_vsnprintf_s_l
+_vsnwprintf_s_l
+_vsprintf_s_l
+_vswprintf_helper
+_wcstombs_l_helper
+_wcstombs_s_l
+_wctomb_s_l
+_woutput_l
+_woutput_s_l
+_write
+_write_nolock
+_wsplitpath_helper
+`.rdata
+`A=ttttttttttttttttttttttttt
+`A=ttttttttttttttttttttttttttttt
+`copy constructor closure'
+`default constructor closure'
+`dynamic atexit destructor for '
+`dynamic initializer for '
+`eh vector constructor iterator'
+`eh vector copy constructor iterator'
+`eh vector destructor iterator'
+`eh vector vbase constructor iterator'
+`eh vector vbase copy constructor iterator'
+`h````
+`h`hhh
+`H9D$8u
+`local static guard'
+`local static thread guard'
+`local vftable'
+`local vftable constructor closure'
+`managed vector constructor iterator'
+`managed vector copy constructor iterator'
+`managed vector destructor iterator'
+`omni callsig'
+`placement delete closure'
+`placement delete[] closure'
+`RTTI
+`scalar deleting destructor'
+`string'
+`tttttttttttttttt
+`typeof'
+`udt returning'
+`vbase destructor'
+`vbtable'
+`vcall'
+`vector constructor iterator'
+`vector copy constructor iterator'
+`vector deleting destructor'
+`vector destructor iterator'
+`vector vbase constructor iterator'
+`vector vbase copy constructor iterator'
+`vftable'
+`virtual displacement map'
+{%ld} 
+|$ $}~HcL$ Hk
+|$ $}THcL$ Hk
+|$ $w
+|$(csm
+|$(MOC
+|$0csm
+|HHcD$$H
+|JHcD$ H
+} Hc|$ HcT$ H
+}!Hc|$ HcT$ H
+}#Hc|$ HcT$ H
+}%HcD$0Hk
+}(HcL$@H
+~:HcL$TH
+~0HcD$PH
+~7HcL$PH
+~cbbbbbbbbbcNh~~~~hNcbbbbbbbbbc~XbbbbbbbbbbN~~~~~~~~NcbbbbbbbbbX
++;;N80000008N
++++424;N
++http://ts-aia.ws.symantec.com/tss-ca-g2.cer0<
++http://ts-crl.ws.symantec.com/tss-ca-g2.crl0(
++Symantec Time Stamping Services Signer - G40
+</assembly>PAPADDINGXXPADDINGPADDINGXXPADDINGPADDINGXXPADDINGPADDINGXXPADDINGPADDINGXXPADDINGPADDINGXXPADDING
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+<file unknown>
+<program name unknown>
+=ttttL^tttttttttttttttttttttttttttttttttttttttt^Lttttt
+>"hcS
+0***;;***0
+000^A^J*
+040704B0
+0g0Q1
+0H9D$8t
+0r0^1
+0ttttttttttttttt4^
+110413100000Z
+121018000000Z
+121221000000Z
+131204124756Z
+140523151517Z0#
+170109173358Z0
+190413100000Z0Q1
+2 <= radix && radix <= 36
+201229235959Z0b1
+201230235959Z0^1
+20402
+4http://secure.globalsign.com/cacert/gscodesigng2.crt04
+50301
+700PP
+700WP
+70503
+7cbbbbbbbbc7
+80604
+9:~ZH
+9D$ }
+9D$ ~
+9D$ u
+9D$@}
+9D$@tR
+9D$`}
+9D$`~
+9D$`~CD
+9D$`s
+9D$0~
+9D$0w>
+9D$0w0
+9D$8} HcL$8Hk
+9D$8r
+9D$8s
+9D$8s+
+9D$D}
+9D$h|1H
+9D$h}ZH
+9D$H~
+9D$hu
+9D$L} HcL$LHk
+9D$Ps
+9D$pu
+9D$X~
+9D$x~
+9D$Xu
+9T$8w
+A cast to a smaller data type has caused a loss of data.  If this was intentional, you should mask the source of the cast with the appropriate bitmask.  For example:  
+A local variable was used before it was initialized
+A*;;;;;;;;;;;;;;*A
+a;;;;;;*aa*;;;;;;a
+a;;;;;;;@@;;;;;;;a
+A^A]^]
+A_A^A]A\_][
+ABCDEFGHIJKLMNOPQRSTUVWXYZ
+abcdefghijklmnopqrstuvwxyz
+ADVAPI32.DLL
+akuuuu^Auuuuuuuuuuuuuuuuuuuuuuuu
+akuuuuuua
+akuuuuuuuka
+akuuuuuuukaAOuuuuuuuuuuuuuuuuOAakuuuuuuuuuu^M
+An application has made an attempt to load the C runtime library without using a manifest.
+April
+Assertion Failed
+Assertion failed!
+Assertion failed: 
+August
+bad allocation
+bad exception
+Bad memory block found at 0x%p.
+Baden-Wuerttemberg1
+bbbbb
+bbbbbbbbb
+bbbbbbbbb7bbbbbbbbbb"~~~~~~~~~~Ncbbbbbbbbbbbbbbbbbbc)~~~~$$~~~~$cbbbbbbbbbbbbbbbbbbc)hh++$$+h+h)cbbbbbbbbbbbbbbbbbbbNU
+bbbbbbbbb7Xbbbbbbbbbb"~~~~~~~~NcbbbbbbbbbX@cbbbbbbbbbcNh~~~~hNcbbbbbbbbbc~p7bbbbbbbbbbc
+bbbbbbbbbbbbbb
+bbbbbbbbbbbbbbbbbbbb
+bbbbbbbbbbbbbbbbbbbbbb
+bbbbbbbbbbbbbbbbbbbbbbbbbb
+bbbbbbbbbbbbbccbbbbbbbbbbbbb
+bbbbbbbbbbbbbp
+bbbbbbbbbbbbccccbbbbbbbbbbbb
+bbbbbbbbbbp@X7bbbb7X~pbbbbbbbbbbbbbbbbbp?
+bbbpUcbbbbbbbbbbbbbbbbbbbbbbbbc
+buf != NULL
+Buffer is too small
+bufferSize <= INT_MAX
+Cast to smaller type causing loss of data
+cbbbbbbbbbb7
+cbbbbbbbbbbbbbbbbc
+CFo~(DP
+Changing the code in this way will not affect the quality of the resulting optimized code.
+char c = (i & 0xFF);
+Client
+client block at 0x%p, subtype %x, %Iu bytes long.
+Client hook allocation failure at file %hs line %d.
+Client hook allocation failure.
+Client hook free failure.
+Client hook re-allocation failure at file %hs line %d.
+Client hook re-allocation failure.
+CloseHandle
+CompanyName
+CONOUT$
+Controlpanel
+Copyright (C) Ploytec GmbH 2000-2013
+CorExitProcess
+CPlApplet
+CPLNumark_V7.cpl
+CPLNumark_V7.exe
+CPLNumarkUSB2.cpl
+CreateFileA
+CreateMutexW
+CreateProcessW
+crt block at 0x%p, subtype %x, %Iu bytes long.
+CRT detected that the application wrote to a heap buffer that was freed.
+CRT detected that the application wrote to memory after end of heap buffer.
+CRT detected that the application wrote to memory before start of heap buffer.
+D$ 9A
+D$ 9D$$s>H
+D$ E3
+D$ H3
+D$ H9D$@u
+D$ H9D$8r
+D$ H9D$8s
+D$ H9L
+D$ HcD$ H
+D$ HcD$$Hk
+D$$9D$ 
+D$$Hk
+D$(9D$,
+D$(fD
+D$(H#
+D$(H3
+D$(Hc
+D$(HcH
+D$(HcL$ H
+D$(HcP
+D$(I3
+D$@H+
+D$@H9
+D$@H9D$hw
+D$@H9D$Pr1
+D$@Hc@
+D$@HcH
+D$@HcL$@A
+D$@HcL$8H
+D$@HcT$LH
+D$@L+
+D$`H+
+D$`Hc@
+D$`HcH
+D$|9D$x}
+D$<9D$hr
+D$<9D$hu*3
+D$09D$@t
+D$0H+
+D$0H9
+D$0H9D$Hr
+D$0HcD$0H
+D$0HcH
+D$0HcH<H
+D$8H9
+D$8H9D$0s"H
+D$8H9D$Hr
+D$8L9
+D$H9D$@t
+D$HH+
+D$hH9
+D$HH9D$ tSH
+D$HH9D$@
+D$HH9D$@s-
+D$HH9D$@u
+D$hHc@
+D$hHcH
+D$l9D$h
+D$L9D$H}\HcT$HH
+D$P%0
+D$P9D$@t
+D$PH+
+D$pH+
+D$PH9
+D$PH9D$(t(H
+D$PH9D$Xt
+D$PH9D$Xt.H
+D$PH9L
+D$pHc@
+D$PHcD
+D$PHcH
+D$pHcH
+D$PHcP
+D$PHcT
+D$x9A
+D$xH+
+D$XH+
+D$xH9D$h
+D$xH9D$hr
+D$XHc@
+D$xHc@
+D$XHcH
+D$xHcH
+D$xHcX
+D$xLc@
+DAMAGED
+dddd, MMMM dd, yyyy
+Debug %s!
+DebugBreak
+December
+DecodePointer
+DeleteCriticalSection
+Detected memory leaks!
+DIQ%z
+DispatchMessageW
+DOMAIN error
+drive
+dst != NULL
+Dumping objects ->
+Durbanville1
+e = mbstowcs_s(&ret, szOutMessage2, 4096, szOutMessage, ((size_t)-1))
+E0C0A
+eeeeeeee
+eeeeeeeeee
+EncodePointer
+EnterCriticalSection
+EnvironmentDirectory
+Error
+Error: memory allocation: bad memory block type.
+Error: possible heap corruption at or near 0x%p
+ExitProcess
+Expression: 
+f:\dd\vctools\crt_bld\self_64_amd64\crt\prebuild\eh\typname.cpp
+f:\dd\vctools\crt_bld\self_64_amd64\crt\src\_file.c
+f:\dd\vctools\crt_bld\self_64_amd64\crt\src\_flsbuf.c
+f:\dd\vctools\crt_bld\self_64_amd64\crt\src\_freebuf.c
+f:\dd\vctools\crt_bld\self_64_amd64\crt\src\_getbuf.c
+f:\dd\vctools\crt_bld\self_64_amd64\crt\src\a_env.c
+f:\dd\vctools\crt_bld\self_64_amd64\crt\src\close.c
+f:\dd\vctools\crt_bld\self_64_amd64\crt\src\commit.c
+f:\dd\vctools\crt_bld\self_64_amd64\crt\src\convrtcp.c
+f:\dd\vctools\crt_bld\self_64_amd64\crt\src\crt0msg.c
+f:\dd\vctools\crt_bld\self_64_amd64\crt\src\dbgdel.cpp
+f:\dd\vctools\crt_bld\self_64_amd64\crt\src\dbgheap.c
+f:\dd\vctools\crt_bld\self_64_amd64\crt\src\dbgrpt.c
+f:\dd\vctools\crt_bld\self_64_amd64\crt\src\dbgrptt.c
+f:\dd\vctools\crt_bld\self_64_amd64\crt\src\dllcrt0.c
+f:\dd\vctools\crt_bld\self_64_amd64\crt\src\errmode.c
+f:\dd\vctools\crt_bld\self_64_amd64\crt\src\expand.c
+f:\dd\vctools\crt_bld\self_64_amd64\crt\src\fclose.c
+f:\dd\vctools\crt_bld\self_64_amd64\crt\src\fileno.c
+f:\dd\vctools\crt_bld\self_64_amd64\crt\src\ioinit.c
+f:\dd\vctools\crt_bld\self_64_amd64\crt\src\isatty.c
+f:\dd\vctools\crt_bld\self_64_amd64\crt\src\isctype.c
+f:\dd\vctools\crt_bld\self_64_amd64\crt\src\lseeki64.c
+f:\dd\vctools\crt_bld\self_64_amd64\crt\src\malloc.h
+f:\dd\vctools\crt_bld\self_64_amd64\crt\src\mbctype.c
+f:\dd\vctools\crt_bld\self_64_amd64\crt\src\mbstowcs.c
+f:\dd\vctools\crt_bld\self_64_amd64\crt\src\mbtowc.c
+f:\dd\vctools\crt_bld\self_64_amd64\crt\src\memcpy_s.c
+f:\dd\vctools\crt_bld\self_64_amd64\crt\src\mlock.c
+f:\dd\vctools\crt_bld\self_64_amd64\crt\src\onexit.c
+f:\dd\vctools\crt_bld\self_64_amd64\crt\src\osfinfo.c
+f:\dd\vctools\crt_bld\self_64_amd64\crt\src\output.c
+f:\dd\vctools\crt_bld\self_64_amd64\crt\src\setlocal.c
+f:\dd\vctools\crt_bld\self_64_amd64\crt\src\stdargv.c
+f:\dd\vctools\crt_bld\self_64_amd64\crt\src\stdenvp.c
+f:\dd\vctools\crt_bld\self_64_amd64\crt\src\strtol.c
+f:\dd\vctools\crt_bld\self_64_amd64\crt\src\swprintf.c
+f:\dd\vctools\crt_bld\self_64_amd64\crt\src\tcscat_s.inl
+f:\dd\vctools\crt_bld\self_64_amd64\crt\src\tcscpy_s.inl
+f:\dd\vctools\crt_bld\self_64_amd64\crt\src\tcsncpy_s.inl
+f:\dd\vctools\crt_bld\self_64_amd64\crt\src\tidtable.c
+f:\dd\vctools\crt_bld\self_64_amd64\crt\src\tsplitpath_s.inl
+f:\dd\vctools\crt_bld\self_64_amd64\crt\src\vsprintf.c
+f:\dd\vctools\crt_bld\self_64_amd64\crt\src\vswprint.c
+f:\dd\vctools\crt_bld\self_64_amd64\crt\src\wcstombs.c
+f:\dd\vctools\crt_bld\self_64_amd64\crt\src\wctomb.c
+f:\dd\vctools\crt_bld\self_64_amd64\crt\src\winsig.c
+f:\dd\vctools\crt_bld\self_64_amd64\crt\src\write.c
+f:\dd\vctools\crt_bld\self_64_amd64\crt\src\xtoa.c
+failure, see the Visual C++ documentation on asserts.
+February
+fffff
+fffffff
+File: 
+FileDescription
+FileVersion
+FindWindowW
+FlsAlloc
+FlsFree
+FlsGetValue
+FlsSetValue
+FlushFileBuffers
+fname
+For information on how your program can cause an assertion
+For more information, see the "Visual C++ Libraries as Shared Side-by-Side Assemblies" topic in the product documentation.
+format != NULL
+FOuuuuuuuuOF
+fRealloc || (!fRealloc && pNewBlock == pOldBlock)
+FreeEnvironmentStringsA
+FreeEnvironmentStringsW
+FreeLibrary
+Friday
+g0e0*
+GetACP
+GetActiveWindow
+GetCommandLineA
+GetConsoleCP
+GetConsoleMode
+GetConsoleOutputCP
+GetCPInfo
+GetCurrentProcess
+GetCurrentProcessId
+GetCurrentThreadId
+GetEnvironmentStrings
+GetEnvironmentStringsW
+GetFileType
+GetLastActivePopup
+GetLastError
+GetLocaleInfoA
+GetModuleFileNameA
+GetModuleFileNameW
+GetModuleHandleW
+GetOEMCP
+GetProcAddress
+GetProcessHeap
+GetProcessWindowStation
+GetStartupInfoA
+GetStdHandle
+GetStringTypeA
+GetStringTypeW
+GetSystemTimeAsFileTime
+GetTickCount
+GetUserObjectInformationA
+GetUserObjectInformationW
+GetWindowsDirectoryW
+GHcL$8H
+GlobalSign CodeSigning CA - G2
+GlobalSign CodeSigning CA - G20
+GlobalSign nv-sa1
+GlobalSign nv-sa1'0%
+GlobalSign Root CA0
+H;D$ t
+H;D$@v
+H;D$xs`
+h~~~~~~~~h
+H+D$@
+H9A t
+H9A(t
+H9A@t
+H9A0t
+H9A8t
+H9AHt
+H9D$ t
+H9D$ tbH
+H9D$(s
+H9D$(t
+H9D$(u
+H9D$@
+H9D$@s
+H9D$@u
+H9D$`
+H9D$`w
+H9D$0
+H9D$0rOH
+H9D$0rPH
+H9D$0szH
+H9D$0taH
+H9D$0w;H
+H9D$0w<H
+H9D$8
+H9D$8r H
+H9D$8s
+H9D$P}
+H9D$Xr1
+H9D$Xs
+H9D$Xu
+HcD$ 
+HcD$ H
+HcD$ HcL
+HcD$ Hk
+HcD$$H
+HcD$@
+HcD$`H
+HcD$<Hk
+HcD$0H
+HcD$0Hk
+HcD$HH
+HcD$HH;
+HcD$LH
+HcD$PHcT$THcL$XLcD$\H
+HcD$xH9
+HcE$H
+HcH I
+HcH<H
+HcL$ H
+HcL$ Hk
+HcL$$H
+HcL$$Hk
+HcL$@
+HcL$@H
+HcL$@Hk
+HcL$0H
+HcL$0Hk
+HcL$8HcD$HH
+HcL$H
+HcL$H3
+HcL$HH
+HcL$LH
+HcL$xH
+HcT$@Hk
+HcT$0Hk
+HcT$HL
+HcT$T
+HEAP CORRUPTION DETECTED: after %hs block (#%d) at 0x%p.
+HEAP CORRUPTION DETECTED: before %hs block (#%d) at 0x%p.
+HEAP CORRUPTION DETECTED: on top of Free block at 0x%p.
+HeapAlloc
+HeapCreate
+HeapDestroy
+HeapFree
+HeapQueryInformation
+HeapReAlloc
+HeapSetInformation
+HeapSize
+HeapValidate
+HFOuuuuuuuuOFH
+HH:mm:ss
+HHcD$PH
+Ht+Hc
+HtKHcL$0Hk
+-http://crl.globalsign.com/gs/gscodesigng2.crl0
+http://ocsp.thawte.com0
+http://ts-ocsp.ws.symantec.com07
+ibase == 0 || (2 <= ibase && ibase <= 36)
+Ignore
+info@ploytec.com0
+InitializeCriticalSectionAndSpinCount
+InternalName
+Invalid allocation size: %Iu bytes.
+IsBadReadPtr
+IsDebuggerPresent
+isleadbyte(_dbcsBuffer(fh))
+IsValidCodePage
+J%`tttttttttttttttttt`%J
+JanFebMarAprMayJunJulAugSepOctNovDec
+January
+Jbbbbbbbbbbbbbbbbbbbbbbbb
+JbbbbbbbbbbbbbbbbbbbbbbbbJ
+JcbbbbbbbbbbbbbbbbcJ
+jekuuuuuuuuuu
+Jttttttt
+Jtttttttt
+KERNEL32.dll
+kttttttttttttttttttttttttttttttttttttttk
+kuuuuuuuuuuuuk^M
+kuuuuuuuuuuuuuuuuuknjFuuuu
+L$,Hk
+L$`H3
+L$0E3
+L$0Hk
+L$8E3
+L$8H3
+L$8Hk
+L$HH+
+L$pH+
+L$XE3
+L$xE3
+L$XH3
+L9\$ t#H
+Lc\$ H
+Lc\$$
+Lc\$$H
+Lc\$8H
+LcD$P3
+LcD$PI
+LcD$TI
+LCMapStringA
+LCMapStringW
+LeaveCriticalSection
+LegalCopyright
+LegalTrademarks
+length < sizeInTChars
+Line: 
+LoadLibraryA
+LoadLibraryW
+Local variable used before initialization
+M^uuuuuuuuuuuuuka
+March
+memcpy_s
+memcpy_s(szShortProgName, sizeof(TCHAR) * (260 - (szShortProgName - szExeName)), dotdotdot, sizeof(TCHAR) * 3)
+Memory allocated at %hs(%d).
+MessageBoxA
+MessageBoxW
+Microsoft Visual C++ Debug Library
+Microsoft Visual C++ Runtime Library
+MM/dd/yy
+Module: 
+Monday
+mscoree.dll
+MSPDB80.DLL
+MultiByteToWideChar
+Normal
+normal block at 0x%p, %Iu bytes long.
+November
+nptr != NULL
+Numark
+Numark USB Audio control panel
+Numark USB Audio)Configure your Numark USB Audio hardware.
+Object dump complete.
+October
+operator
+OriginalFilename
+OutputDebugStringA
+OutputDebugStringW
+Ouuuuuuuuu
+Ouuuuuuuuuj
+OuuuuuuuuujnOuuuuuuuuuO
+OuuuuuuuuuOejuuuuuuuuuu
+OuuuuuuuuuOekFuuuuuuuuuuO
+OuuuuuuuuuuF^eOuuuuuuuuuO
+OuuuuuuuuuuF^u
+OuuuuuuuuuuuuuuuuO
+OuuuuuuuuuuuuuuuuuuO!//&&
+OuuuuuuuuuuuuuuuuuuO!eeee
+pbbbb
+pbbbbbb
+pbbbbbbbbbb
+pbbbbbbbbbp
+pbbbbbbbp
+pbbbbbp
+pBlock != NULL
+PDBOpenValidate5
+PeekMessageW
+pHead->nBlockUse == nBlockUse
+pHead->nLine == IGNORE_LINE && pHead->lRequest == IGNORE_REQ
+Please contact the application's support team for more information.
+Ploytec GmbH1
+pNode->next != NULL
+pOldBlock->nLine == IGNORE_LINE && pOldBlock->lRequest == IGNORE_REQ
+PostMessageW
+pp7bbbbbbbbbbc
+ProductName
+ProductVersion
+Program: 
+Program: %s%s%s%s%s%s%s%s%s%s%s%s
+pUserData != NULL
+pwcs != NULL
+q%9Y 
+QueryPerformanceCounter
+R6002
+R6008
+R6009
+R6016
+R6017
+R6018
+R6019
+R6024
+R6025
+R6026
+R6027
+R6028
+R6030
+R6031
+R6032
+R6033
+R6034
+raise
+RaiseException
+RegCloseKey
+RegOpenKeyExA
+RegQueryValueExA
+retsize <= sizeInWords
+Root CA1
+RtlCaptureContext
+RtlLookupFunctionEntry
+RtlPcToFileHeader
+RtlUnwindEx
+RtlVirtualUnwind
+Runtime Check Error.
+Run-Time Check Failure #%d - %s
+runtime error 
+Runtime Error!
+s != NULL
+s*HcD$ H
+Saturday
+Schopfheim1
+Second Chance Assertion Failed: File 
+September
+SetFilePointer
+SetHandleCount
+SetLastError
+SetStdHandle
+SetUnhandledExceptionFilter
+-s'Hc
+SING error
+sizeInBytes <= INT_MAX
+sizeInBytes > 0
+sizeInBytes > retsize
+sizeInBytes >= count
+sizeInTChars > (size_t)(is_neg ? 2 : 1)
+sizeInTChars > 0
+Sleep
+SOFTWARE\Microsoft\VisualStudio\9.0\Setup\VS
+src != NULL
+Stack around _alloca corrupted
+Stack around the variable '
+Stack corrupted near unknown variable
+Stack memory around _alloca was corrupted
+Stack memory corruption
+Stack memory was corrupted
+Stack pointer corruption
+state != NULL
+str != NULL
+strcat_s
+strcat_s(outmsg, (sizeof(outmsg) / sizeof(outmsg[0])), "\n\n")
+strcat_s(outmsg, (sizeof(outmsg) / sizeof(outmsg[0])), rterrs[tblindx].rterrtxt)
+strcat_s(szLineMessage, 4096, "\n")
+strcat_s(szLineMessage, 4096, "\r")
+strcat_s(szLineMessage, 4096, szUserMessage)
+strcpy_s
+strcpy_s(*env, cchars, p)
+strcpy_s(outmsg, (sizeof(outmsg) / sizeof(outmsg[0])), "Runtime Error!\n\nProgram: ")
+strcpy_s(progname, progname_size, "<program name unknown>")
+strcpy_s(szExeName, 260, "<program name unknown>")
+strcpy_s(szLineMessage, 4096, szFormat ? "Assertion failed: " : "Assertion failed!")
+strcpy_s(szOutMessage, 4096, "_CrtDbgReport: String too long or IO Error")
+strcpy_s(szOutMessage, 4096, szLineMessage)
+strcpy_s(szOutMessage2, 4096, "_CrtDbgReport: String too long or Invalid characters in String")
+strcpy_s(szUserMessage, 4096, "_CrtDbgReport: String too long or IO Error")
+stream != NULL
+string != NULL && sizeInBytes > 0
+string != NULL && sizeInWords > 0
+String is not null terminated
+StringFileInfo
+strncpy_s
+strncpy_s(pch, progname_size - (pch - progname), "...", 3)
+strtoxl
+Sunday
+SunMonTueWedThuFriSat
+Symantec Corporation100.
+Symantec Corporation1402
+'Symantec Time Stamping Services CA - G2
+'Symantec Time Stamping Services CA - G20
+szCmdLine
+szPath
+t"HcD$$H
+T$$Hk
+T$PE3
+t$PH;D$Xr
+T$PH+
+t%HcD$$H
+t)HcL$@A
+t;HcL$ Hk
+t{HcL$H3
+t2HcL$0Hk
+t5HcL$0Hk
+tbHcL$ Hk
+TerminateProcess
+tEtEE
+Thawte Certification1
+Thawte Timestamping CA0
+Thawte1
+The Block at 0x%p was allocated by aligned routines, use _aligned_free()
+The Block at 0x%p was allocated by aligned routines, use _aligned_realloc()
+The value of ESP was not properly saved across a function call.  This is usually a result of calling a function declared with one calling convention with a function pointer declared with a different calling convention.
+The variable '
+This application has requested the Runtime to terminate it in an unusual way.
+This indicates a bug in your application.
+This indicates a bug in your application. It is most likely the result of calling an MSIL-compiled (/clr) function from a native constructor or from DllMain.
+This is an unsupported way to load Visual C++ DLLs. You need to modify your application to build with a manifest.
+Thursday
+TimeStamp-2048-10
+TimeStamp-2048-20
+tKHcL$ Hk
+tKHcL$0Hk
+TLOSS error
+tNHcD$0Hk
+TranslateMessage
+Translation
+tttttL^tttttttttttttttttttttttttttttttttttttttt^Ltttt=
+tttttt
+tttttttJ
+tttttttt
+ttttttttJ
+ttttttttt
+tttttttttt
+tttttttttttt
+tttttttttttttt
+ttttttttttttttt
+ttttttttttttttt0;
+ttttttttttttttt0JJ*
+tttttttttttttttt`
+tttttttttttttttttt
+tttttttttttttttttt%
+ttttttttttttttttttttt
+tttttttttttttttttttttt
+ttttttttttttttttttttttttt=A`
+tttttttttttttttttttttttttt
+tttttttttttttttttttttttttttt
+ttttttttttttttttttttttttttttt=A`
+tttttttttttttttttttttttttttttttt
+tttttttttttttttttttttttttttttttttt
+tttttttttttttttttttttttttttttttttttt
+tttttttttttttttttttttttttttttttttttttttt
+Tuesday
+u#H9-
+u$HcL$ Hk
+u<HcL$$H
+u'HcD$$H
+UnhandledExceptionFilter
+Unknown exception
+Unknown Filename
+Unknown Module Name
+Unknown Runtime Check Error
+upHcD$ Hk
+usb-audio.deNumarkV7
+USER32.DLL
+USER32.dll
+uuHuuuuuuuuuuuuOOOOuuuuuuuuuuuuHkkFuuuuuuuuuuO
+uukMOuuuuuuuuuuuuuuuuuuuuuuuuOMkuuu^AuuuuuuuuuuuuuuuuuuuuuuuuA^uuuuua6uuuuuuuuuuuuuuuuuuuuuu6akuuuuuk=
+uuuuuuuuu
+uuuuuuuuuFjuuuuuuuuuu
+uuuuuuuuuFuuuuuuuuuu
+uuuuuuuuuuknjFuuuuFjekuuuuuuuuuuuuuuuuuk
+uuuuuuuuuuuuuOOuuuuuuuuuuuuuHkua
+uuuuuuuuuuuuuu
+uuuuuuuuuuuuuuuuuuuu
+uuuuuuuuuuuuuuuuuuuuuu
+uuuuuuuuuuuuuuuuuuuuuuuuuu
+UVAUAVH
+uZHcL$0Hk
+v2.9.64
+V7 USB Audio Device
+VarFileInfo
+VirtualQuery
+VS_VERSION_INFO
+w#HcL$PH
+w%HcL$PH
+w&HcL$TH
+WaitForSingleObject
+Warning
+wcscat_s
+wcscat_s(szLineMessage, 4096, L"\n")
+wcscat_s(szLineMessage, 4096, L"\r")
+wcscat_s(szLineMessage, 4096, szUserMessage)
+wcscpy_s
+wcscpy_s(szExeName, 260, L"<program name unknown>")
+wcscpy_s(szLineMessage, 4096, szFormat ? L"Assertion failed: " : L"Assertion failed!")
+wcscpy_s(szOutMessage, 4096, L"_CrtDbgReport: String too long or IO Error")
+wcscpy_s(szOutMessage, 4096, szLineMessage)
+wcscpy_s(szOutMessage2, 4096, L"_CrtDbgReport: String too long or Invalid characters in String")
+wcscpy_s(szUserMessage, 4096, L"_CrtDbgReport: String too long or IO Error")
+wcsncpy_s
+wcstombs_s(&ret, szaOutMessage, 4096, szOutMessage, ((size_t)-1))
+wcstombs_s(((void *)0), szOutMessage2, 4096, szOutMessage, ((size_t)-1))
+Wednesday
+Western Cape1
+WideCharToMultiByte
+WriteConsoleA
+WriteConsoleW
+WriteFile
+X~pbbbbbbbbbb
+XHcD$`H
+xppwpp
+xpxxxx
+xtoa_s
+xtow_s
+y3+.{
+z0x0@
+Z0X03

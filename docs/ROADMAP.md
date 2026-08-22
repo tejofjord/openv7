@@ -6,8 +6,9 @@
 - [x] CoreMIDI virtual destination → control-OUT (LEDs, motor)
 - [x] VirtualDJ starter mapping
 - [ ] Confirm the full per-control MIDI map on hardware (run `openv7 --learn` and
-      operate each control)
-- [ ] Confirm platter reverse (see PROTOCOL.md open item)
+      operate each control, or `tools/win/midi-learn.ps1` on Windows)
+- [x] Confirm platter reverse — `B0 46 01`, latched while stopped (PROTOCOL.md)
+- [x] Confirm the whole motor command set incl. ramp times and pitch-trim law
 
 ## v1.x — polish
 - [ ] LED feedback mapping (VU meters, pad/button lights)

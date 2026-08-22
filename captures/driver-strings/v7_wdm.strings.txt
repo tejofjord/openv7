@@ -1,0 +1,249 @@
+﻿!mbSetFormatCalled
+!mMMEAdapter
+!This program cannot be run in DOS mode.
+"http://crl.globalsign.net/root.crl0
+&0$0"
+&https://www.globalsign.com/repository/0
+&https://www.globalsign.com/repository/03
+(http://ocsp2.globalsign.com/gscodesigng20
+*** DriverEntry (MME/KS/WDM) %s built:%s - %s
+,0*0(
+...!OutputBufferLength
+...!ResultantFormatLength
+...!ResultantFormatPtr
+...cDataRangeIntersection ch-max:%d bits-min:%d bits-max:%d freq-min:%d freq-max:%d
+...cDataRangeIntersection.MaximumChannels < 2
+...cDataRangeIntersection.MinimumBitsPerSample > cDataRangeIntersection.MaximumBitsPerSample
+...cDataRangeIntersection.MinimumSampleFrequency != uHWDigitalLockedFrequency
+...cDataRangeIntersection.MinimumSampleFrequency != uHWFrequency
+...cDataRangeIntersection.MinimumSampleFrequency > cDataRangeIntersection.MaximumSampleFrequency
+...got it
+...iFrequency:%d mNotificationInterval:%d framingsize:%d
+...mMaxFrames is nMaxSamples,mChannelsPerFrame:%d mChannelsPerFrame:%d
+...OutputBufferLength < sizeRequired
+...RegValue not written
+...RegValue not written - STATUS_INVALID_PARAMETER
+...RegValue not written - STATUS_OBJECT_NAME_NOT_FOUND
+.http://crl.thawte.com/ThawteTimestampingCA.crl0
+.pdata
+.rsrc
+.text
+/Pz0G
+/V.?.
+;D$\s
+;D$ds
+@ 9D$
+@@9A@s
+@@9D$8v
+@0>0<
+@D9ADv
+@D9D$Hs
+@H9AHs
+@H9D$Hv
+@L9ALv
+@P9APs
+\QOiq
+\vnO^
+]jxdE
+|$  tB
+|$( t
+|$@ tB
+|$Hdv
+|$X t|
+|$X tw
+}bHcD$8
+}RHcL$ Hk
++http://ts-aia.ws.symantec.com/tss-ca-g2.cer0<
++http://ts-crl.ws.symantec.com/tss-ca-g2.crl0(
++Symantec Time Stamping Services Signer - G40
+</assembly>PAPADDINGXXPADDINGPADDINGXXPADDINGPADDINGXXPADDINGPADDINGXXPADDINGPADDINGXXPADDINGPADDINGXXPADDINGPADDINGXXPADDINGPADDINGXXPADDINGPADDINGXXPADDINGPADDINGXXPADDINGPADDINGXXPADDINGPADDINGXXPADDINGPADDINGXXPADDINGPADDINGXXPADDINGPADDINGXXPADDINGPADDINGXXPADDINGPADDINGXXPADDINGPADDINGXXPADDINGPADDINGXXPADDINGPADDINGXXPADDINGPADDINGXXPADDINGPADDINGXXPADDINGPADDINGXXPADDING
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+>"hcS
+040904b0
+0g0Q1
+0r0^1
+110413100000Z
+121018000000Z
+121221000000Z
+131204124756Z
+140523151518Z0#
+16:21:04
+170109173358Z0
+190413100000Z0Q1
+201229235959Z0b1
+201230235959Z0^1
+20402
+4http://secure.globalsign.com/cacert/gscodesigng2.crt04
+50301
+7 9zE
+70503
+80604
+9Ahu H
+9D$4w
+9D$8r
+AudioSM::init nChannels is %d
+AudioSM::init nChannels is 0
+AudioSM::init nUsedSamples != nMaxSamples %d - %d
+B.reloc
+Baden-Wuerttemberg1
+CFo~(DP
+Comments
+CompanyName
+Copyright (C) Ploytec GmbH 2000-2013
+D$ E3
+D$ H9A
+D$ HcL$ Hk
+D$(9A
+D$(9D$
+D$@9ALu\H
+D$@9APuOH
+D$\9D$Hv#D
+D$\9D$L
+D$`H;
+D$`H+
+D$09D$
+D$89D$
+D$d9D$HvAH
+D$DfA
+D$H fA
+D$H;D$\
+D$H;D$d
+D$h9D$0rMH
+D$hH9
+D$P9D$
+D$X9A8
+D$x9H@s
+D$XH+
+datarangeintersection STATUS_SUCCESS
+DbgPrint
+DIQ%z
+Durbanville1
+E0C0A
+error mMaxFrames is nMaxSamples,mChannelsPerFrame:%d mChannelsPerFrame:%d
+ExAllocatePool
+ExclInputs lenMME:%d wdmBufferSize:%d
+ExFreePoolWithTag
+FileDescription
+FileVersion
+g0e0*
+GlobalSign CodeSigning CA - G2
+GlobalSign CodeSigning CA - G20
+GlobalSign nv-sa1
+GlobalSign nv-sa1'0%
+GlobalSign Root CA0
+H.data
+h.rdata
+H9D$8u H
+H9D$8u"H
+H9D$Hu
+HcD$ A
+HcD$ H
+HcD$ Hk
+HcD$,Hi
+HcD$8
+HcL$ H
+HcL$ Hk
+HcT$ Hk
+HINIT
+-http://crl.globalsign.com/gs/gscodesigng2.crl0
+http://ocsp.thawte.com0
+http://ts-ocsp.ws.symantec.com07
+info@ploytec.com0
+InternalName
+IoAllocateIrp
+IofCallDriver
+IoFreeIrp
+KeByteBuffer::alloc -> already sufficient memory:%d
+KeByteBuffer::alloc -> buffer:%p user:%p
+KeByteBuffer::alloc -> request new memory :%d
+KeCancelTimer
+KeDelayExecutionThread
+KeInitializeDpc
+KeInitializeMutex
+KeInitializeTimer
+KeReleaseMutex
+KeSetTimer
+KeWaitForEvent - invalid IRQ Level %d / timeout %d /ID %d
+KeWaitForSingleObject
+L$ fD
+L$hE3
+L$LHk
+LegalCopyright
+LegalTrademarks
+May 23 2014
+memcmp
+MMEAdapter::checkExchangeData not attached yet
+MMEAdapter::checkExchangeDataFnc pAdapter->mReqSync.tryLock() failed
+MMEAdapter::checkNewConfig()
+MMEAdapter::USBDriverStcCallback what:%d value:%d
+MMEWave::DataRangeIntersection !IsEqualGUIDAligned(pClientDataRange->MajorFormat, KSDATAFORMAT_TYPE_AUDIO )
+MMEWave::DataRangeIntersection !IsEqualGUIDAligned(pClientDataRange->SubFormat, KSDATAFORMAT_SUBTYPE_PCM )
+MMEWave::DataRangeIntersection !IsEqualGUIDAligned(pMyDataRange->MajorFormat, KSDATAFORMAT_TYPE_AUDIO )
+MMEWave::DataRangeIntersection !IsEqualGUIDAligned(pMyDataRange->SubFormat, KSDATAFORMAT_SUBTYPE_PCM )
+MMEWave::DataRangeIntersection !pClientDataRange
+MMEWave::DataRangeIntersection !pMyDataRange
+MMEWave::DataRangeIntersection !pPinDescriptor
+MMEWave::DataRangeIntersection ERROR: capture stream already allocated
+MMEWave::DataRangeIntersection ERROR: render stream already allocated
+MMEWave::DataRangeIntersection pClientDataRange->FormatSize != sizeof(KSDATARANGE_AUDIO)
+MMEWave::DataRangeIntersection pMyDataRange->FormatSize != sizeof(KSDATARANGE_AUDIO)
+MMEWaveStream::SetNotificationFreq interval:%d framingsize:%d m_uSampleSize:%d
+nmrkusba.sys
+No Inputs or Outputs for system sound found.
+NTOSKRNL.exe
+Numark
+Numark USB Audio WDM Driver
+ObfDereferenceObject
+ObfReferenceObject
+OriginalFilename
+PcAddAdapterDevice
+PcInitializeAdapterDriver
+PcNewMiniport
+PcNewPort
+PcNewServiceGroup
+PcRegisterPhysicalConnection
+PcRegisterSubdevice
+Ploytec GmbH1
+portcls.sys
+PrivateBuild
+ProductName
+ProductVersion
+q%9Y 
+qauds
+reg_query_binary %ws %d %p %d %p %p
+reg_query_binary dest:%p max:%d
+registryReadBinary status:%08X
+ReqSync::init
+ReqSync::lock() is currently locked...
+ReqSync::term
+Root CA1
+Schopfheim1
+SetFormat returned %08X
+SpecialBuild
+START STREAM : check other stream frequency
+START STREAM : other stream is not running -> allow change but mark other for reconfig
+StringFileInfo
+Symantec Corporation100.
+Symantec Corporation1402
+'Symantec Time Stamping Services CA - G2
+'Symantec Time Stamping Services CA - G20
+Thawte Certification1
+Thawte Timestamping CA0
+Thawte1
+TimeStamp-2048-10
+TimeStamp-2048-20
+Topology
+Translation
+v2.9.64
+v2.9.64.0
+VarFileInfo
+VS_VERSION_INFO
+WARNING registryGetLong failed %ws %ws default:%d
+WARNING registryReadBinary failed %ws %ws status:%08X
+WARNING registrySetLong failed %ws %ws value:%d error:%08X
+WARNING registryWriteBinary failed %ws %ws len:%d error:%08X
+WDM fillDescriptor sr:%d
+Western Cape1
+y3+.{
+z0x0@
+Z0X03

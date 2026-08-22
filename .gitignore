@@ -13,3 +13,11 @@
 .vscode/
 .idea/
 *.swp
+
+# Windows MIDI helper build artifact (rebuild: tools/win/build.ps1)
+tools/win/OpenV7Midi.dll
+
+# probe reports are regenerated; findings live in docs/
+captures/motor-probe.md
+captures/pitch-probe.md
+captures/raw/

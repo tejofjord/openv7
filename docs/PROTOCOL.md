@@ -22,10 +22,22 @@ Legend: ✅ verified on hardware · 🔬 documented, needs on-device confirmatio
 | IF0 alt1 | `0x02` | isochronous | OUT | audio playback (also the clock) — 156 B/packet |
 | IF0 alt1 | `0x83` | bulk | IN  | control / MIDI from device |
 | IF0 alt1 | `0x04` | bulk | OUT | control / MIDI to device (LEDs, motor) |
-| IF1 alt1 | `0x81` | isochronous | IN  | audio return (unused; V7 has no inputs) |
+| IF1 alt1 | `0x81` | isochronous | IN  | audio return — the V7 **does** have an input (see note) |
 | IF1 alt1 | `0x86` | bulk | IN  | audio return / high-rate (drained) |
 
 Both interfaces have a zero-bandwidth `alt0`; select `alt1` to stream.
+
+> **Input correction.** The Windows vendor driver registers `KSCATEGORY_CAPTURE`
+> and Windows enumerates a `Line In (Numark V7 Audio - WDM 2.9.64)` endpoint
+> alongside the `Speakers` one. The earlier "V7 has no inputs" note here was
+> wrong. Whether the input is line-only or line/phono is still unestablished —
+> see [VENDOR-DRIVER.md](VENDOR-DRIVER.md).
+
+> **The control stream does not need an audio client.** With the vendor driver
+> loaded and nothing playing, the V7 streams control data continuously — 9 892
+> messages in 5 s of platter motion with no audio application open. The driver
+> sustains this itself with a dedicated frame-locked keepalive; see
+> [VENDOR-DRIVER.md](VENDOR-DRIVER.md).
 
 ## Bring-up handshake
 
@@ -48,32 +60,88 @@ sends nothing on the control-IN endpoint until this clock is running.**
 - ✅ Control data is **standard MIDI** wrapped in the bulk stream, padded with
   `0xFD` idle bytes. Strip `0xFD` and parse normally.
 - ✅ **Input** example: platter motion → `B0 00 vv` (deck A, CC `0x00`) /
-  `B0 02 vv` (deck B, CC `0x02`), a wrapping 7-bit position counter, paired with
-  a `0xE0` pitch-bend timestamp for velocity (3600 ticks/rev, clock 2,822,400 Hz).
+  `B0 02 vv` (deck B, CC `0x02`), a wrapping 7-bit position counter, paired
+  1:1 with a `0xE0` pitch-bend timestamp for velocity.
 - ✅ `B0 7D xx` / `B0 6E xx` appear at ~idle rate — device heartbeat/status.
+
+### Platter reporting — measured
+
+- ✅ **3600 counts per revolution.** With pitch trim explicitly zeroed the
+  platter runs at 2000.3 counts/sec at the 33⅓ setting; 2000 / (33⅓ / 60) =
+  3600.5. Beware: measuring with a stale non-zero pitch trim gives ~3767,
+  because the trim scales the speed and not the encoder.
+- ✅ **One message per encoder count, coalesced at the USB frame rate.** Below
+  ~17 RPM the message rate tracks the count rate exactly (398 msg/s at 6.67 RPM,
+  790 at 13.2); above that it saturates at ~998.7/s — one message per 1 ms USB
+  frame — and each message carries a multi-count delta instead.
+- ✅ **A stationary platter reports nothing at all.** Silence is the "stopped"
+  signal, not a dropped stream. Any decoder that infers speed from message
+  *count* rather than from counts-per-wall-clock-second will read slow speeds
+  as much faster than they are.
+- ✅ **`0xE0` timestamp clock = 2,822,400 Hz confirmed** (44100 × 64). Measured
+  2,822,904 and 2,822,831 units/sec in two independent runs — within 0.02 %.
 - ✅ **Output**: send one MIDI message per 42-byte frame, `0xFD`-padded, on bulk
   `0x04`.
 
 ## Motor command set (host → device, on bulk `0x04`)
 
-Status byte `0xB0`, deck A shown. From the Mixxx/community map; ✅ = confirmed
-to move the platter on this unit.
+Status byte `0xB0`, deck A shown. **All ✅ — measured on hardware** by using the
+platter's own position counter as a tachometer (see
+[tools/win/motor-probe.ps1](../tools/win/motor-probe.ps1)).
 
-| Function | Message | Notes |
+| Function | Message | Measured behaviour |
 |---|---|---|
-| Soft-start (ramp) | `B0 43 00` | ✅ platter spins up |
-| Brake (ramp stop) | `B0 44 00` | ✅ platter stops |
-| Instant start | `B0 41 00` | ✅ |
-| Instant stop | `B0 42 00` | 🔬 |
-| RPM select | `B0 45 vv` | ✅ `00` = 33⅓, `01` = 45 (speed changes live) |
-| Direction | `B0 46 vv` | 🔬 `00` fwd / `01` reverse — reverse not yet confirmed on hardware |
-| Ramp times | `B0 47/48 vv` | 🔬 start / brake ramp speed |
-| Pitch trim (follow playback) | `B0 49 msb` + `B0 69 lsb` | 🔬 signed; Serato maps rate ±0.519 → ±5190 |
+| Instant start | `B0 41 00` | ✅ reaches speed in ~700 ms |
+| Instant stop | `B0 42 00` | ✅ stops immediately |
+| Soft-start (ramp) | `B0 43 00` | ✅ ramps up, duration set by `0x47` |
+| Brake (ramp stop) | `B0 44 00` | ✅ ramps down, duration set by `0x48` |
+| RPM select | `B0 45 vv` | ✅ `00` → **33.29 RPM**, `01` → **45.00 RPM** |
+| Direction | `B0 46 vv` | ✅ `00` fwd, `01` **reverse** (−33.38 RPM) |
+| Start / brake ramp time | `B0 47 vv` / `B0 48 vv` | ✅ higher = slower: `00` → 0.7 s, `20` → 2.7 s, `40` → 4.5 s |
+| Pitch trim | `B0 49 msb` + `B0 69 lsb` | ✅ signed 14-bit, see below |
 
-**Open item — reverse.** `B0 46 01` did not visibly reverse the platter with a
-soft-start after braking. Candidate fixes to verify: full instant-stop + latch
-before an instant-start, or driving reverse via negative pitch-trim
-(`B0 49`/`B0 69`) the way Serato produces backspins.
+### Direction — the reverse gotcha (previously an open item)
+
+`B0 46 01` **does** reverse the platter, at full speed. The earlier failure was
+one of sequencing, not of the command: the direction latch is only sampled when
+the motor starts. It must be issued **while the platter is stopped**:
+
+```
+B0 42 00      # instant stop  (must actually be stopped)
+B0 46 01      # latch reverse
+B0 43 00      # soft start -> runs backwards
+```
+
+Setting `0x46` on an already-spinning platter does nothing, which is why a
+brake-then-soft-start sequence appeared to ignore it.
+
+### Pitch trim — `B0 49` / `B0 69`
+
+A **signed 14-bit two's-complement** value split MSB/LSB across the standard
+MIDI pair (`0x69` = `0x49` + 32):
+
+```
+v14 = (msb << 7) | lsb          # 0 .. 16383
+s   = v14 < 8192 ? v14 : v14 - 16384
+speed = nominal_rpm * (1 + s / 10000)
+```
+
+Confirmed across `s` = −8000 … +7000 against a 33⅓ nominal, worst-case error
+0.32 RPM and typically under 0.1:
+
+| `s` | predicted RPM | measured RPM |
+|---|---|---|
+| −8000 | 6.67 | 6.67 |
+| −4000 | 20.01 | 19.92 |
+| 0 | 33.34 | 33.34 |
+| +4000 | 46.67 | 46.67 |
+| +5190 | 50.64 | 50.58 |
+
+So one unit = 0.01 % of nominal speed, and the community note that Serato maps
+rate ±0.519 → ±5190 is exactly right: ±51.9 %.
+
+Negative trim slows the platter but does **not** reverse it — it bottoms out at
+a stop. Reverse is `0x46`.
 
 ## Audio codec (not yet implemented)
 
