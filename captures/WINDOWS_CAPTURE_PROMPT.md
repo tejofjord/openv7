@@ -60,6 +60,11 @@ unsure) → Start. Then do these, in one session, jotting rough timestamps:
 1. **Unplug and replug the V7** — captures the full init/handshake.
 2. **~60 seconds doing NOTHING**, hands off — reveals the idle keepalive (the #1 unknown).
 3. **Spin the platter ~10 s.**
+3b. **Play audio to the V7 for ~10 s** — set `Speakers (Numark V7 Audio - WDM)`
+   as the output device and play music. **This is now a high-priority scenario:**
+   it decides which endpoint actually carries PCM. See the hypothesis in
+   `docs/AUDIO-CODEC.md` that iso-OUT `0x02` is only a keepalive pipe and the
+   real audio rides on bulk `0x04` / `0x86`.
 4. **Stop the platter, wait 30–60 s untouched, then spin again** — does it keep reporting? What
    did the driver send during the wait?
 5. **Press each button / pad / move each fader once** — full control map + any LED feedback the

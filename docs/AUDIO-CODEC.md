@@ -23,6 +23,62 @@ drivers.
 > bytes, which is not a multiple of Ozzy's 48-byte output frame. The V7's packet
 > geometry is genuinely different and is not yet derived.
 
+## ⚠️ Hypothesis: iso-OUT `0x02` is the keepalive pipe, not the audio pipe
+
+This would reframe OpenV7's model of the device, so it is stated as a
+hypothesis with its evidence rather than as fact.
+
+**The arithmetic does not work.** `src/main.c` runs the iso-OUT stream at
+**8000 packets/s** (125 µs microframes — so the V7 enumerates at USB high
+speed), 156 bytes each:
+
+```
+156 B x 8000 /s              = 1,248,000 B/s   available on iso-OUT 0x02
+8 ch x 3 B x 44100 /s        = 1,058,400 B/s   raw S24_3LE audio      (fits)
+44100 /s / 8000 /s           = 5.5125          audio frames per packet
+5.5125 x 48 B Ploytec frame  =   264.6 B       needed per packet      (does NOT fit in 156)
+```
+
+So iso-OUT `0x02` has nowhere near the bandwidth to carry the Ploytec 48-byte
+encoded frame. It can only carry raw audio if the format were plain
+`S24_3LE` — which contradicts the whole premise of a bit-scattered codec.
+
+**The endpoint numbers line up with Ploytec's, and `0x02` is not among them.**
+Ozzy's constants versus the V7's actual endpoints:
+
+| Ozzy constant | Endpoint | V7 endpoint | |
+|---|---|---|---|
+| `PLOYTEC_EP_MIDI_IN` | `0x03` | bulk IN `0x83` | ✅ exact |
+| `PLOYTEC_EP_PCM_IN` | `0x06` | bulk IN `0x86` | ✅ exact |
+| `PLOYTEC_EP_PCM_OUT` | `0x05` | bulk OUT `0x04` | off by one |
+
+Two of three match exactly. Under that reading the V7's endpoints are:
+
+- `0x83` (ep 3) — **MIDI/control IN**. This is already how OpenV7 uses it. ✅
+- `0x86` (ep 6) — **PCM IN**, the audio input. OpenV7 currently only *drains*
+  this endpoint and throws the data away. It is the line input.
+- `0x04` (ep 4) — **PCM OUT with MIDI embedded in its slots**. OpenV7 uses it
+  for MIDI only, in 42-byte `0xFD`-padded frames — consistent with sending
+  packets that are all idle-filler and no audio.
+- `0x02` (ep 2) — **isochronous keepalive**. Ozzy states Ploytec bulk devices
+  carry a keepalive isoc-out pipe "on endpoint range 1–4", and `v7_usb.sys`
+  has `m_pcOutPipeKeepAlive` (see [VENDOR-DRIVER.md](VENDOR-DRIVER.md)).
+
+**It explains the observed behaviour.** OpenV7 has always pushed *silence* on
+`0x02` and described it as "the audio clock", and the device streams control
+data happily. That is precisely what a keepalive pipe does. It also explains why
+the control stream dies when that stream stalls, and why draining iso-IN `0x81`
+turned out to be required.
+
+**How to settle it:** capture the vendor driver while audio is actually playing
+and see which endpoint the PCM appears on. That is scenario 3 of
+`captures/WINDOWS_CAPTURE_PROMPT.md`, with music playing to the
+`Speakers (Numark V7 Audio)` endpoint.
+
+If the hypothesis holds, native audio is a different job than assumed: not
+"encode into the 156-byte iso packets", but "drive PCM over bulk `0x04`
+alongside the MIDI already going there, and read capture from bulk `0x86`".
+
 ## The codec
 
 8 channels of 24-bit audio, converted between standard `S24_3LE` interleaved

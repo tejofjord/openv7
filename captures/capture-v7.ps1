@@ -1,4 +1,4 @@
-<#
+﻿<#
   OpenV7 - Numark V7 vendor-driver USB capture (Windows)
 
   Captures raw USB traffic from the stock Ploytec/Numark v2.9 Windows driver so we can
@@ -64,7 +64,7 @@ New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
 $ifaceLines = & $UsbPcapCmd --extcap-interfaces 2>$null
 $ifaces = @()
 foreach ($line in $ifaceLines) {
-    if ($line -match 'value=(\\\.\USBPcap\d+)') { $ifaces += $Matches[1] }
+    if ($line -match 'value=(\\\\\.\\USBPcap\d+)') { $ifaces += $Matches[1] }
 }
 if ($ifaces.Count -eq 0) {
     Write-Host "ERROR: no USBPcap interfaces found." -ForegroundColor Red
@@ -87,7 +87,7 @@ if ($v7) {
 # --- start one capture per interface -----------------------------------------
 $procs = @()
 foreach ($if in $ifaces) {
-    $tag  = ($if -replace '.*\', '')
+    $tag  = ($if -replace '.*\\', '')
     $file = Join-Path $OutDir "$tag.pcap"
     if (Test-Path $file) { Remove-Item $file -Force }
     $cmdArgs = @('-d', $if, '-o', $file, '-A', '-s', '65535', '-b', '1048576')
@@ -116,20 +116,28 @@ try {
   Spin the platter continuously for the whole step.
 '@ 15
 
-    Step 4 'LONG IDLE, THEN SPIN AGAIN' @'
+    Step 4 'PLAY AUDIO TO THE V7' @'
+  Set "Speakers (Numark V7 Audio - WDM 2.9.64)" as the Windows output device
+  and play music for the whole step.
+  -> decides which endpoint actually carries PCM. docs/AUDIO-CODEC.md argues
+     iso-OUT 0x02 is only a keepalive pipe and the real audio rides on the
+     bulk endpoints - this capture settles it.
+'@ 20
+
+    Step 5 'LONG IDLE, THEN SPIN AGAIN' @'
   Stop the platter and leave it completely untouched.
   When the countdown reaches ~10s remaining, spin the platter again.
   -> does the control stream survive a long idle, and what kept it alive?
 '@ 60
 
-    Step 5 'EXERCISE EVERY CONTROL' @'
+    Step 6 'EXERCISE EVERY CONTROL' @'
   Press each button and pad once, move every fader/knob through its range:
   PLAY, CUE, SYNC, hot cues 1-5, loop controls, FX, browse encoder,
   strip search, pitch fader, and the platter touch surface.
   -> full control map, plus any LED/display feedback the driver sends on 0x04.
 '@ 90
 
-    Step 6 'STALL / RECOVERY (optional)' @'
+    Step 7 'STALL / RECOVERY (optional)' @'
   If you can make the controller go silent or stall, do it now, then do
   whatever brings it back (restart the DJ software, or unplug/replug).
   If you cannot reproduce a stall, just wait this step out - it is optional.
@@ -157,3 +165,4 @@ finally {
     Write-Host "Timestamps written to $notesFile" -ForegroundColor Green
     Write-Host "Done. Tell Claude the capture is finished." -ForegroundColor Yellow
 }
+
