@@ -145,12 +145,23 @@ Two software explanations for that silence were tested and both eliminated:
 So the pipe is open, unmuted, streaming at full rate, and carrying exact
 zeros — there is simply no signal at the converters.
 
-**This one is hard-blocked on physical cabling.** Determining the input
-encoding requires an actual signal at the V7's rear inputs — either a source
-plugged in, or an RCA loopback from the V7's own outputs back to its inputs,
-with a capture running while audio plays. `tools/win/capture-audio.ps1` already
-does everything else; with a loopback in place it would resolve this in one
-run. Everything else about the input is already measured.
+**…and it is moot: the V7 has no audio inputs.** The official *V7 Quickstart
+Guide v1.2* lists the complete rear panel — POWER IN, POWER SWITCH, USB,
+DECK A / DECK B OUTPUT (RCA), MOTOR TORQUE, REMOTE, LINK CONNECTION, DECK
+LOCATION SWITCH — and no mic or line input appears anywhere in the manual.
+
+`v7_wdm.sys` is the generic Ploytec WDM driver shared across the whole OEM
+family, so it registers a capture category because the *chipset* supports one —
+not because this *product* wires one up. That fits every observation: the pipe
+streams at full rate, unmuted, at 100 % gain, and carries exact zeros, because
+there are no converters on the other end of it.
+
+So the practical conclusion for OpenV7 is that bulk IN `0x86` is a **chipset
+artifact to be drained, not an audio source**, and the input frame layout below
+is documentation of the Ploytec format rather than something the V7 will ever
+put data into. If a V7 variant *does* have inputs, the layout is already
+written down and `tools/win/capture-audio.ps1` would confirm it in one run with
+a signal present.
 
 > There is one remaining *software* avenue, deliberately not taken. Ozzy
 > documents bit `0x02` of vendor register `'I'` as **input routing / source

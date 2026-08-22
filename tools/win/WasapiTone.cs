@@ -236,7 +236,11 @@ public static class WasapiTone
 
         client.Start();
         long totalFrames = 0, nonZeroBytes = 0;
+        double peak = 0.0, sumSq = 0.0;
+        long sampleCount = 0;
         int bytesPerFrame = wf.nBlockAlign;
+        bool isFloat = (wf.wFormatTag == WAVE_FORMAT_IEEE_FLOAT) ||
+                       (wf.wFormatTag == WAVE_FORMAT_EXTENSIBLE && wf.wBitsPerSample == 32);
         DateTime end = DateTime.UtcNow.AddSeconds(seconds);
         while (DateTime.UtcNow < end)
         {
@@ -251,6 +255,27 @@ public static class WasapiTone
                 {
                     int n = (int)frames * bytesPerFrame;
                     for (int i = 0; i < n; i++) if (Marshal.ReadByte(data, i) != 0) nonZeroBytes++;
+
+                    // Track peak and RMS so "is there actually a signal" has a
+                    // number behind it rather than just a non-zero byte count.
+                    for (uint f = 0; f < frames; f++)
+                    {
+                        for (int c = 0; c < wf.nChannels; c++)
+                        {
+                            long off = (long)f * bytesPerFrame + (long)c * (wf.wBitsPerSample / 8);
+                            double s;
+                            if (isFloat)
+                                s = BitConverter.ToSingle(BitConverter.GetBytes(Marshal.ReadInt32(data, (int)off)), 0);
+                            else if (wf.wBitsPerSample == 16)
+                                s = Marshal.ReadInt16(data, (int)off) / 32768.0;
+                            else
+                                s = Marshal.ReadInt32(data, (int)off) / 2147483648.0;
+                            double a = Math.Abs(s);
+                            if (a > peak) peak = a;
+                            sumSq += s * s;
+                            sampleCount++;
+                        }
+                    }
                 }
                 totalFrames += frames;
                 cap.ReleaseBuffer(frames);
@@ -259,7 +284,10 @@ public static class WasapiTone
         }
         client.Stop();
         Marshal.FreeCoTaskMem(pFormat);
-        return string.Format("OK ({0}) frames={1} nonZeroBytes={2}", fmt, totalFrames, nonZeroBytes);
+        double rms = sampleCount > 0 ? Math.Sqrt(sumSq / sampleCount) : 0.0;
+        double peakDb = peak > 0 ? 20.0 * Math.Log10(peak) : -999.0;
+        return string.Format("OK ({0}) frames={1} nonZeroBytes={2} peak={3:F5} ({4:F1} dBFS) rms={5:F5}",
+                             fmt, totalFrames, nonZeroBytes, peak, peakDb, rms);
     }
 
     /*

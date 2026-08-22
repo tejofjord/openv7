@@ -17,7 +17,22 @@
 $script:COUNTS_PER_REV = 3600.0
 $script:SAMPLE_RATE = 998.7
 
-function Send-Motor([byte]$cc, [byte]$v) { [void][MidiMon]::Send(0xB0, $cc, $v) }
+# Which CC carries platter position, and what to add to a deck-A motor CC.
+# The V7's hardware A/B switch decides which block the device answers on:
+# deck A reports position on CC 0x00 and takes motor commands 0x41-0x49;
+# deck B reports on CC 0x02 and takes 0x4B-0x53 (deck A + 0x0A).
+$script:POS_CC = 0x00
+$script:MOTOR_BASE = 0x00
+
+function Set-Deck([ValidateSet('A', 'B')][string]$Deck) {
+    if ($Deck -eq 'B') { $script:POS_CC = 0x02; $script:MOTOR_BASE = 0x0A }
+    else { $script:POS_CC = 0x00; $script:MOTOR_BASE = 0x00 }
+}
+
+# Takes the deck-A CC and shifts it to the selected deck's block.
+function Send-Motor([byte]$cc, [byte]$v) {
+    [void][MidiMon]::Send(0xB0, [byte]($cc + $script:MOTOR_BASE), $v)
+}
 
 # Signed per-sample delta of the wrapping 7-bit counter.
 function Get-SignedDelta($cur, $prev) {
@@ -59,7 +74,7 @@ function Get-SpeedSeries {
     foreach ($r in $raw) {
         $p = $r -split ' '
         $t = [int64]$p[0]; $st = [int]$p[1]; $d1 = [int]$p[2]; $d2 = [int]$p[3]
-        if ($st -ne 0xB0 -or $d1 -ne 0x00) { continue }
+        if ($st -ne 0xB0 -or $d1 -ne $script:POS_CC) { continue }
         if ($t0 -lt 0) { $t0 = $t; $prev = $d2; continue }
         $b = [int][math]::Floor(($t - $t0) / $BinMs)
         if (-not $sum.ContainsKey($b)) { $sum[$b] = 0; $n[$b] = 0 }

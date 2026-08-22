@@ -154,21 +154,47 @@ a 12-position indicator ring rather than discrete lamps.
 
 ### Motor (deck B = deck A + `0x0A`)
 
-| CC A | CC B | Function | Confidence |
-|---|---|---|---|
-| `0x41` | `0x4B` | **Instant start** | ✅ (absent from the Mixxx map) |
-| `0x42` | `0x4C` | **Instant stop** | ✅ (absent from the Mixxx map) |
-| `0x43` | `0x4D` | Soft start | ✅ |
-| `0x44` | `0x4E` | Brake | ✅ |
-| `0x45` | `0x4F` | RPM select — `00` = 33⅓, `01` = 45 | ✅ |
-| `0x46` | `0x50` | Direction — `01` = reverse, latched while stopped | ✅ |
-| `0x47` | `0x51` | Start ramp time | ✅ |
-| `0x48` | `0x52` | Brake ramp time | ✅ |
-| `0x49`+`0x69` | `0x53`+`0x73` | Pitch trim, signed 14-bit | ✅ |
+**Both decks measured on hardware.** The V7 has a physical A/B switch, and it
+selects which command block the device answers on — so deck B was verified
+directly rather than inferred.
 
-OpenV7's hardware testing found `0x41` / `0x42` (instant start/stop), which the
-community mapping does not contain. Deck-B addresses for those are inferred
-from the +`0x0A` block offset and are unverified.
+| CC A | CC B | Function | Deck A | Deck B |
+|---|---|---|---|---|
+| `0x41` | `0x4B` | **Instant start** | ✅ | ✅ 33.33 RPM |
+| `0x42` | `0x4C` | **Instant stop** | ✅ | ✅ 0 RPM |
+| `0x43` | `0x4D` | Soft start | ✅ | ✅ |
+| `0x44` | `0x4E` | Brake | ✅ | ✅ |
+| `0x45` | `0x4F` | RPM select — `00` = 33⅓, `01` = 45 | ✅ | ✅ 33.33 / 45.00 |
+| `0x46` | `0x50` | Direction — `01` = reverse, latched while stopped | ✅ | ✅ −33.33 RPM |
+| `0x47` | `0x51` | Start ramp time | ✅ | 🔬 |
+| `0x48` | `0x52` | Brake ramp time | ✅ | 🔬 |
+| `0x49`+`0x69` | `0x53`+`0x73` | Pitch trim, signed 14-bit | ✅ | ✅ matches the law to 0.17 RPM |
+
+`0x41`/`0x42` (instant start/stop) appear in **no** other source — not the
+community mapping, not the vendor driver strings — and `0x4B`/`0x4C` were pure
+inference from the block offset until they were tested. Both work.
+
+### The A/B switch ("DECK LOCATION SWITCH"), and what it proves
+
+The manual calls this rear-panel control the **DECK LOCATION SWITCH** and
+describes it as *"reserved for future use"*. It is not: it selects which deck's
+command block the unit answers on, and that is directly measurable.
+
+
+With the switch on B:
+
+- `B0 43 00` (deck-A soft start) produces **zero** messages and no motion;
+- `B0 4D 00` (deck-B soft start) spins the platter and reports position on
+  **CC `0x02`**, at the same 998.8/s, still paired 1:1 with pitch-bend.
+
+So the switch re-routes the whole command block, and the **+`0x0A` motor offset
+is proven rather than assumed**. CC `0x02` as deck-B platter position is
+likewise now confirmed, not cross-referenced.
+
+This matters beyond the motor: it is direct evidence that the block-offset model
+in the table at the top of this document is real, which raises confidence in the
+button (+`0x21`) and LED (+`0x16`) offsets even though those rows are still 🔬.
+Operating a control in each switch position would confirm those the same way.
 
 Full semantics for the motor commands — including the reverse latching gotcha
 and the pitch-trim law — are in [PROTOCOL.md](PROTOCOL.md).

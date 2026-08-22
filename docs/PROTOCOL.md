@@ -22,16 +22,37 @@ Legend: ✅ verified on hardware · 🔬 documented, needs on-device confirmatio
 | IF0 alt1 | `0x02` | isochronous | OUT | audio playback (also the clock) — 156 B/packet |
 | IF0 alt1 | `0x83` | bulk | IN  | control / MIDI from device |
 | IF0 alt1 | `0x04` | bulk | OUT | control / MIDI to device (LEDs, motor) |
-| IF1 alt1 | `0x81` | isochronous | IN  | audio return — the V7 **does** have an input (see note) |
+| IF1 alt1 | `0x81` | isochronous | IN  | audio return — near-empty (3 kB/s), but must be drained |
 | IF1 alt1 | `0x86` | bulk | IN  | audio return / high-rate (drained) |
 
 Both interfaces have a zero-bandwidth `alt0`; select `alt1` to stream.
 
-> **Input correction.** The Windows vendor driver registers `KSCATEGORY_CAPTURE`
-> and Windows enumerates a `Line In (Numark V7 Audio - WDM 2.9.64)` endpoint
-> alongside the `Speakers` one. The earlier "V7 has no inputs" note here was
-> wrong. Whether the input is line-only or line/phono is still unestablished —
-> see [VENDOR-DRIVER.md](VENDOR-DRIVER.md).
+> **On the "input" — the endpoint is probably vestigial.** The Windows vendor
+> driver registers `KSCATEGORY_CAPTURE` and Windows enumerates a
+> `Line In (Numark V7 Audio - WDM 2.9.64)` endpoint, and bulk IN `0x86` really
+> does stream continuously at 2,822,685 B/s. On that basis this file briefly
+> claimed the original "V7 has no inputs" note was wrong.
+>
+> That claim was wrong. The official *V7 Quickstart Guide v1.2* lists the rear
+> panel in full — POWER IN, POWER SWITCH, USB, **DECK A / DECK B OUTPUT (RCA)**,
+> MOTOR TORQUE, REMOTE (reserved), LINK CONNECTION, DECK LOCATION SWITCH
+> (reserved) — and the manual contains **no mic or line input anywhere**. The
+> V7 has audio outputs only.
+>
+> The capture endpoint exists because `v7_wdm.sys` is the generic Ploytec WDM
+> driver shared across the whole OEM family (TEAC, Allen & Heath, Elektron — see
+> [VENDOR-DRIVER.md](VENDOR-DRIVER.md)): it registers a capture category because
+> the *chipset* supports one, not because this *product* wires one up. That fits
+> every observation — the pipe streams at full rate, unmuted, at 100 % gain, and
+> carries **exact zeros**, because there are no converters behind it.
+>
+> So `0x86` is a chipset artifact the host must drain, not an audio source. The
+> original "no inputs" note was right.
+
+> **The four output channels are Deck A + Deck B.** The manual's
+> "DECK A / DECK B OUTPUT (RCA)" — two stereo pairs — matches the measured
+> 4-channel iso-OUT exactly, and the capture confirms the assignment: a tone
+> played to the Windows endpoint landed on channels 1–2 with 3–4 silent.
 
 > **The control stream does not need an audio client.** With the vendor driver
 > loaded and nothing playing, the V7 streams control data continuously — 9 892
