@@ -50,14 +50,14 @@ Continuous controls use the standard MIDI 14-bit convention — **coarse on CC
 | CC A | CC B | Control | Confidence |
 |---|---|---|---|
 | `0x00` | `0x02` | **Platter position** — 7-bit wrapping counter, 3600 counts/rev | ✅ |
-| `0x04` + `0x24` | `0x05` + `0x25` | **Pitch fader** (coarse + fine, 14-bit) | 🔬 |
-| `0x45` | `0x4D` | **Strip search** (needle strip) | 🔬 |
-| `0x46` | `0x4E` | **Motor START TIME knob** | 🔬 |
-| `0x47` | `0x4F` | **Motor STOP TIME knob** | 🔬 |
-| `0x44` | — | **Browse / track select knob** | 🔬 |
-| `0x56`, `0x58` | | FX parameter | 🔬 |
-| `0x57` + `0x77` | `0x59` + `0x79` | FX slider (coarse + fine) | 🔬 |
-| `0x5A`, `0x5B` | | FX select | 🔬 |
+| `0x04` + `0x24` | `0x05` + `0x25` | **Pitch fader** (coarse + fine, 14-bit) | ✅ |
+| `0x45` | `0x4D` | **Strip search** (needle strip) | ✅ |
+| `0x46` | `0x4E` | **Motor START TIME knob** | ✅ |
+| `0x47` | `0x4F` | **Motor STOP TIME knob** | ✅ |
+| `0x44` | — | **Browse / track select knob** | ✅ |
+| `0x56`, `0x58` | | FX parameter | `0x58` ✅ · `0x56` 🔬 |
+| `0x57` + `0x77` | `0x59` + `0x79` | FX slider (coarse + fine) | ✅ |
+| `0x5A`, `0x5B` | | FX select | ✅ |
 
 Each platter position message is paired 1:1 with a `0xE0` pitch-bend carrying a
 14-bit timestamp on a **2,822,400 Hz** clock ✅ — that pairing is what yields
@@ -71,8 +71,18 @@ velocity. A stationary platter sends nothing at all ✅.
 
 ### Buttons (note-on, status `0x90`)
 
-Deck B = deck A + `0x21`. Mixxx key names given as the primary data; the
-"likely control" column is inference from those names and is **not** authoritative.
+Deck B = deck A + `0x21`, **measured** — with the A/B switch moved mid-capture,
+PLAY appeared as both `0x11` and `0x32`, CUE as `0x10`/`0x31`, SYNC as
+`0x0F`/`0x30`, and the hot cues as `0x13`–`0x17` / `0x34`–`0x38`.
+
+**Every address below has been seen on the wire except the five listed above**
+(`0x12` SHIFT A, `0x42` MOTOR ON/OFF B, `0x53` FX SELECT A, `0x7D` DECK SELECT R).
+The Mixxx key names remain the source for *what each control does*; the "likely
+control" column is inference from those names and is **not** authoritative.
+
+**Press and release:** buttons send `90 nn 7F` down and `90 nn 00` up —
+note-on with zero velocity, **never** note-off `0x80` ✅. Code that listens for
+`0x80` will miss every release.
 
 | Note A | Note B | Mixxx key | Likely control |
 |---|---|---|---|
@@ -104,7 +114,9 @@ Non-deck buttons:
 | Note | Mixxx key | Likely control |
 |---|---|---|
 | `0x06` / `0x07` | `SelectPrev/NextPlaylist` | BACK / FWD (browse) |
-| `0x08`, `0x0D` | `LoadSelectedIntoFirstStopped` | LOAD |
+| `0x08` | `LoadSelectedIntoFirstStopped` | ⚠️ **not** LOAD PREPARE — see below |
+| `0x0D` | `LoadSelectedIntoFirstStopped` | **LOAD PREPARE** ✅ confirmed by pressing it |
+| `0x09`, `0x0A`, `0x0B` | *(absent from the Mixxx map)* | library buttons — CRATES / PREPARE / FILES, individual assignment unconfirmed |
 | `0x0C` / `0x0E` | `LoadSelectedTrack` ch1 / ch2 | LOAD A / LOAD B |
 | `0x52` / `0x59` | `flanger` ch1 / ch2 | FX ON A / B |
 | `0x53` / `0x5A` | `FxSelect` | FX SELECT |
