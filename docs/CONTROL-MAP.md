@@ -297,6 +297,31 @@ address block. That is the only occasion on which the V7 volunteers control
 state without the control being moved, and it is how a host can learn fader and
 knob positions at startup.
 
+### ✅ Rear-panel switches — new, in no published mapping
+
+Both rear switches report to the host. Neither appears in the Mixxx mapping, in
+the vendor driver's strings, or anywhere else found:
+
+| Address | Control | Observed |
+|---|---|---|
+| `90 55` | **DECK LOCATION** (deck sits left or right of the mixer) | `7F` / `00` |
+| `90 58` | **MOTOR TORQUE** (high / low platter feel) | `7F` / `00` |
+
+The velocity encodes the **switch position**, not press-and-release — these are
+toggles, so there is no release event to report.
+
+Worth noting the manual describes DECK LOCATION as *"reserved for future use"*.
+It is not: it reports on every change.
+
+`90 58` is the more useful of the two for a host. Motor torque changes how the
+platter feels under the hand, and without this a host would have no way to know
+the setting.
+
+> These two were found by testing the rear panel specifically, after the front
+> controls were exhausted. Worth remembering that a "complete" control map
+> derived from software mappings can miss whole controls — a published mapping
+> only contains what its author chose to map.
+
 ### ⚠️ Output must follow the switch
 
 **The device ignores the non-selected deck's block entirely.** This is measured,

@@ -1,0 +1,58 @@
+﻿{
+    "label":  "deck-location-switch",
+    "seconds":  300,
+    "totalMessages":  13,
+    "confirmed":  [
+
+                  ],
+    "undocumented":  [
+                         {
+                             "Key":  "90:55",
+                             "Desc":  "NoteOn   0x55",
+                             "Status":  144,
+                             "D1":  85,
+                             "Count":  4,
+                             "Min":  0,
+                             "Max":  127,
+                             "Distinct":  2,
+                             "Expected":  null,
+                             "Sample":  "90 55 7F|90 55 00|90 55 7F|90 55 00"
+                         },
+                         {
+                             "Key":  "90:58",
+                             "Desc":  "NoteOn   0x58",
+                             "Status":  144,
+                             "D1":  88,
+                             "Count":  3,
+                             "Min":  0,
+                             "Max":  127,
+                             "Distinct":  2,
+                             "Expected":  null,
+                             "Sample":  "90 58 00|90 58 7F|90 58 00"
+                         },
+                         {
+                             "Key":  "B0:6E",
+                             "Desc":  "CC       0x6E",
+                             "Status":  176,
+                             "D1":  110,
+                             "Count":  1,
+                             "Min":  0,
+                             "Max":  0,
+                             "Distinct":  1,
+                             "Expected":  null,
+                             "Sample":  "B0 6E 00"
+                         },
+                         {
+                             "Key":  "B0:7D",
+                             "Desc":  "CC       0x7D",
+                             "Status":  176,
+                             "D1":  125,
+                             "Count":  1,
+                             "Min":  1,
+                             "Max":  1,
+                             "Distinct":  1,
+                             "Expected":  null,
+                             "Sample":  "B0 7D 01"
+                         }
+                     ]
+}
