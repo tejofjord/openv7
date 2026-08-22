@@ -92,15 +92,48 @@ and deck B stereo pairs respectively.
 > bit-interleaved codec Ozzy documents belongs to the Xone family's bulk PCM
 > path, not to the V7's isochronous output.
 
-### The input side is still unknown
+## 🧩 The 64-byte input frame layout
 
-Bulk IN `0x86` carried **all zeros** during both the tone and the silence. Its
-*rate* is pinned (64 B/frame × 44.1 kHz) and that frame size matches Ozzy's
-`PLOYTEC_IN_FRAME_SIZE` exactly, which is suggestive of the 64-byte
-bit-per-byte input layout — but with no signal present, nothing can be
-confirmed.
+The V7's input frame size — 64 bytes at 44.1 kHz — matches Ozzy's
+`PLOYTEC_IN_FRAME_SIZE` exactly, so its `ploytec_decode_frame` is very likely
+the V7's layout. Reduced from that implementation (MIT, Marcel Bierling) to a
+rule rather than 24 lines of shifts:
 
-Two software explanations were tested and both eliminated:
+**Each channel occupies one bit position across 24 consecutive bytes, one bit
+per byte, MSB of the sample first.**
+
+| Bytes | Bit 0 | Bit 1 | Bit 2 | Bit 3 | Bits 4–7 |
+|---|---|---|---|---|---|
+| `0x00`–`0x17` | ch 1 | ch 3 | ch 5 | ch 7 | unused |
+| `0x20`–`0x37` | ch 2 | ch 4 | ch 6 | ch 8 | unused |
+| `0x18`–`0x1F`, `0x38`–`0x3F` | — | — | — | — | **entirely unused** |
+
+So to recover channel *n*'s 24-bit sample: walk the 24 bytes of its half in
+order, take the bit at its position from each, and shift them in MSB-first —
+byte `0x00` carries the sample's most significant bit, byte `0x17` its least.
+
+Two consequences worth noting:
+
+- **16 of the 64 bytes are padding.** Only 48 bytes carry data (24 per half),
+  and only the low 4 bits of each. The frame is 8 channels × 24 bits = 192
+  bits inside a 512-bit frame.
+- **This is a genuine bit-scatter**, unlike the V7's output. A byte-wise
+  deinterleave of the input will produce noise.
+
+> ⚠️ **Inferred, not confirmed on a V7.** The frame-size match is strong
+> evidence, but caution is warranted precisely because the V7's *output* turned
+> out **not** to follow Ozzy's Xone layout — the Xone encodes output into
+> 48-byte bit-interleaved frames on bulk, while the V7 sends plain 24-bit PCM
+> over isochronous. Having diverged on one direction, it may diverge on the
+> other. The V7 also has fewer channels than 8, so it probably populates only
+> the first one or two bit positions per half.
+
+### Why it could not be confirmed here
+
+Bulk IN `0x86` carried **all zeros** during both the tone and the silence, so
+there was no signal to check the layout against.
+
+Two software explanations for that silence were tested and both eliminated:
 
 1. **ADC gated until something opens the input?** No. A WASAPI capture stream
    on the `Line In (Numark V7 Audio)` endpoint delivered **220,059 frames at

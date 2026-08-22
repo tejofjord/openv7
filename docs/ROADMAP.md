@@ -30,8 +30,11 @@
 - [ ] **Fix the iso pacing** — OpenV7 sends fixed 156-byte packets, a 2.36×
       overfeed, and the prime suspect for the long-idle stall. Do this first.
 - [ ] Feed real PCM into the iso packets (no encoder needed)
-- [ ] Input (`0x86`) encoding — rate known (64 B/frame), format unconfirmed;
-      needs a capture with a live source in the V7's inputs
+- [x] Input (`0x86`) frame layout documented — bit-scatter, one bit per byte
+      across 24 bytes per channel ([AUDIO-CODEC.md](AUDIO-CODEC.md))
+- [ ] Confirm the input layout on a V7 — the output diverged from the Xone, so
+      the input may too. Needs a live source or an RCA loopback in the V7's
+      inputs, then `tools/win/capture-audio.ps1`.
 - [ ] Expose a CoreAudio virtual device (AudioServerPlugin) so the V7's own
       outputs are selectable in any app
 - [ ] Sync the audio device clock to the iso stream
