@@ -208,9 +208,13 @@ static NSColor *HEX(int r,int g,int b,double a){ return [NSColor colorWithSRGBRe
     /* BLEEP / REVERSE is a three-position switch, not a button, and the two
        positions report on SEPARATE notes. MEASURED: 0x1D latches -- it went 7F
        and stayed on for 11.5 s until the switch was moved back, which is the
-       persistent REVERSE detent. BLEEP is the momentary one (spring-loaded, the
-       censor), inferred as 0x1C from the pair documented in CONTROL-MAP.md; it
-       did not fire during the capture, so that half is NOT yet measured. */
+       persistent REVERSE detent. 0x1C is BLEEP -- also MEASURED now: momentary,
+       spring-loaded (the censor), 7F while held and 00 on return.
+
+       BEWARE THE BOUNCE: the BLEEP lever chatters badly on release, up to a
+       dozen 7F/00 pairs in a second on one flick. Fine for lighting a lever on
+       a panel, but a host that acts on every edge will re-trigger the censor
+       repeatedly -- debounce before driving playback with it. */
     if (s==0x90 && (d0==0x1C||d0==0x3D)) { _revState = d1?1:0; self.needsDisplay=YES; }
     if (s==0x90 && (d0==0x1D||d0==0x3E)) { _revState = d1?2:0; self.needsDisplay=YES; }
     V7Control *pc=[self controlForPress:s d0:d0];

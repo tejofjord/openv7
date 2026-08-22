@@ -287,9 +287,20 @@ static void ploytec_rearm(void) {
     if (libusb_submit_transfer(rt) != 0) { free(rb); libusb_free_transfer(rt); }
 }
 
-/* bulk-IN watchdog state (definition of arm_bulk is further down) */
-static struct libusb_transfer *g_t_in = NULL, *g_t_aux = NULL;
-static int g_in_live = 0, g_aux_live = 0;
+/* bulk-IN watchdog state (definition of arm_bulk is further down)
+
+   The control pipe uses a RING of transfers, not one. With a single transfer
+   there is a window between completion and resubmission in which nothing is
+   armed on 0x83, and whatever the device sends during it is lost. That showed
+   up as a one-byte shift in the MIDI stream: a capture of the BLEEP switch,
+   whose bounce bursts hard, produced "90 00 1c" in the middle of a run of
+   "90 1c 7f"/"90 1c 00" -- the pairing slipped because one 1c went missing.
+   Keeping several transfers queued means the endpoint is always armed. */
+#define CTRL_IN_NXFER 4
+static struct libusb_transfer *g_t_in[CTRL_IN_NXFER];
+static struct libusb_transfer *g_t_aux = NULL;
+static int g_in_live[CTRL_IN_NXFER];
+static int g_aux_live = 0;
 static long g_ctrl_bytes = 0;          /* control-IN traffic, for --diag */
 static void arm_bulk(struct libusb_transfer *t, int *live, unsigned char ep, const char *name);
 
@@ -323,7 +334,8 @@ static void LIBUSB_CALL out_cb(struct libusb_transfer *t) {
 }
 static struct midi_split g_in;                        /* device-side parser state */
 static void LIBUSB_CALL ctrl_in_cb(struct libusb_transfer *t) {
-    g_in_live = 0;                                     /* no longer in flight */
+    int idx = (int)(intptr_t)t->user_data;
+    g_in_live[idx] = 0;                                /* no longer in flight */
     if (t->status == LIBUSB_TRANSFER_COMPLETED) {
         g_ctrl_bytes += t->actual_length;
         uint8_t out[3];
@@ -342,7 +354,7 @@ static void LIBUSB_CALL ctrl_in_cb(struct libusb_transfer *t) {
     }
     if (t->status == LIBUSB_TRANSFER_NO_DEVICE) { g_quit = 1; return; }
     if (t->status == LIBUSB_TRANSFER_STALL) libusb_clear_halt(g_dev, V7_EP_CTRL_IN);
-    if (!g_quit) arm_bulk(t, &g_in_live, V7_EP_CTRL_IN, "control-IN");
+    if (!g_quit) arm_bulk(t, &g_in_live[idx], V7_EP_CTRL_IN, "control-IN");
 }
 
 /* ---- bulk-IN re-arm watchdog -------------------------------------------
@@ -471,14 +483,18 @@ int main(int argc, char **argv) {
         libusb_set_iso_packet_lengths(isoin[i], V7_ISO_IN_PKT_SIZE);
         libusb_submit_transfer(isoin[i]);
     }
-    /* control-IN and audio-return-drain reads */
-    static unsigned char cin[512], aux[512];
-    struct libusb_transfer *t_in  = libusb_alloc_transfer(0);
+    /* control-IN ring + audio-return drain */
+    static unsigned char aux[512];
+    for (int i = 0; i < CTRL_IN_NXFER; i++) {
+        unsigned char *cb_buf = calloc(1, 512);
+        g_t_in[i] = libusb_alloc_transfer(0);
+        libusb_fill_bulk_transfer(g_t_in[i], g_dev, V7_EP_CTRL_IN, cb_buf, 512,
+                                  ctrl_in_cb, (void *)(intptr_t)i, 0);
+        arm_bulk(g_t_in[i], &g_in_live[i], V7_EP_CTRL_IN, "control-IN");
+    }
     struct libusb_transfer *t_aux = libusb_alloc_transfer(0);
-    libusb_fill_bulk_transfer(t_in,  g_dev, V7_EP_CTRL_IN, cin, sizeof cin, ctrl_in_cb, NULL, 0);
     libusb_fill_bulk_transfer(t_aux, g_dev, V7_EP_AUX_IN,  aux, sizeof aux, drain_cb,   NULL, 0);
-    g_t_in = t_in; g_t_aux = t_aux;
-    arm_bulk(t_in,  &g_in_live,  V7_EP_CTRL_IN, "control-IN");
+    g_t_aux = t_aux;
     arm_bulk(t_aux, &g_aux_live, V7_EP_AUX_IN,  "aux-drain");
 
     if (g_learn)
@@ -499,7 +515,8 @@ int main(int argc, char **argv) {
            this a single failed submit silently kills the control stream for the
            whole session -- the fault that presented as "the GUI registers
            nothing until you restart the bridge". No-op when both are live. */
-        arm_bulk(g_t_in,  &g_in_live,  V7_EP_CTRL_IN, "control-IN");
+        for (int i = 0; i < CTRL_IN_NXFER; i++)
+            arm_bulk(g_t_in[i], &g_in_live[i], V7_EP_CTRL_IN, "control-IN");
         arm_bulk(g_t_aux, &g_aux_live, V7_EP_AUX_IN,  "aux-drain");
         /* drain outgoing MIDI to the device */
         int sent_real = 0;
@@ -533,8 +550,9 @@ int main(int argc, char **argv) {
         if (g_diag) {
             time_t now = time(NULL);
             if (now != diag_t) {
-                fprintf(stderr, "  [diag] iso-out/s=%ld iso-in/s=%ld  ctrl-bytes=%ld in-live=%d  (healthy: ~200/~62)\n",
-                        g_isoout_cmpl - diag_o0, g_isoin_cmpl - diag_i0, g_ctrl_bytes, g_in_live);
+                fprintf(stderr, "  [diag] iso-out/s=%ld iso-in/s=%ld  ctrl-bytes=%ld in-armed=%d/%d  (healthy: ~200/~62)\n",
+                        g_isoout_cmpl - diag_o0, g_isoin_cmpl - diag_i0, g_ctrl_bytes,
+                        g_in_live[0]+g_in_live[1]+g_in_live[2]+g_in_live[3], CTRL_IN_NXFER);
                 diag_o0 = g_isoout_cmpl; diag_i0 = g_isoin_cmpl; diag_t = now;
             }
         }
@@ -549,7 +567,7 @@ int main(int argc, char **argv) {
        Skipping this leaves the device mid-stream and can jam the control stream
        on the next launch. */
     for (int i = 0; i < ISO_NXFER; i++) { libusb_cancel_transfer(iso[i]); libusb_cancel_transfer(isoin[i]); }
-    libusb_cancel_transfer(t_in);
+    for (int i = 0; i < CTRL_IN_NXFER; i++) libusb_cancel_transfer(g_t_in[i]);
     libusb_cancel_transfer(t_aux);
     for (int i = 0; i < 12; i++) { struct timeval tv = { 0, 50000 }; libusb_handle_events_timeout(g_ctx, &tv); }
     for (int i = 0; i < V7_NUM_INTERFACES; i++) {

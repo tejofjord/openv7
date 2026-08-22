@@ -63,6 +63,39 @@ Each platter position message is paired 1:1 with a `0xE0` pitch-bend carrying a
 14-bit timestamp on a **2,822,400 Hz** clock ✅ — that pairing is what yields
 velocity. A stationary platter sends nothing at all ✅.
 
+> ### ✅ BLEEP / REVERSE is a three-position switch — both halves measured
+>
+> | Note | Position | Behaviour |
+> |---|---|---|
+> | `0x1C` | **BLEEP** (up) | **Momentary** — `7F` while held, `00` on release |
+> | `0x1D` | **REVERSE** (down) | **Latching** — `7F` held for 11.5 s across a switch throw, `00` only when moved back |
+>
+> Centre is the rest position and reports nothing. The earlier entry listed the
+> pair as "REVERSE / CENSOR" in `0x1C`,`0x1D` order, which is the wrong way
+> round: the latching detent is `0x1D`.
+>
+> ⚠️ **BLEEP bounces hard.** One flick produced up to a dozen `7F`/`00` pairs in
+> a second as the spring lever chattered back. A host that acts on every edge
+> will re-trigger the censor repeatedly; debounce before driving playback.
+>
+> ### ✅ Phantom `CC 0x00` messages were a host-side byte loss, not a control
+>
+> The "constant-valued CC `0x00` / `0x01`" anomaly recorded above was **not**
+> coming from the device. A BLEEP-bounce capture produced `90 00 1C` in the
+> middle of a clean run of `90 1C 7F` / `90 1C 00`: the byte pairing had shifted
+> by one, i.e. a byte was lost, not a message invented.
+>
+> Cause was in the bridge, not the protocol: only ONE bulk-IN transfer was in
+> flight on `0x83`, so between a transfer completing and its callback
+> resubmitting, nothing was armed and anything arriving in that gap was dropped.
+> Bursty traffic — switch bounce, platter spam — hits that window. Fixed with a
+> ring of queued transfers; re-running the same stress case gave 35 messages and
+> zero malformed, where the single-transfer build desynced within 5 s.
+>
+> **Anyone reverse-engineering this device from a host capture should rule out
+> their own receive path before recording a surprising address.** This one nearly
+> entered the map as a real control.
+
 > ### ✅ Library buttons resolved — PREPARE / FILES / CRATES
 >
 > These were recorded here as a cluster with "individual assignment unconfirmed".
