@@ -177,6 +177,24 @@ Byte 2 of the firmware response (step 1) is a decimal-encoded version:
 
 - ✅ Control data is **standard MIDI** wrapped in the bulk stream, padded with
   `0xFD` idle bytes. Strip `0xFD` and parse normally.
+- ✅ **Inbound frame layout** (bulk IN `0x83`), captured verbatim while the
+  platter was turning:
+
+  ```
+  b0 00 7e   e0 71 75   FD x35   00
+  |________| |________| |_____|  |_|
+   CC 0x00    pitch-bend padding  terminator
+   platter    timestamp
+   position
+  ```
+
+  Also **42 bytes**, one frame per USB frame (1 kHz), carrying **two MIDI
+  messages per frame** — the platter position and its paired timestamp. The
+  terminator is `0x00` inbound, versus `0xE0` outbound.
+
+  Successive frames stepped `7E → 00 → 02 → 04 → 06 → 08`, i.e. +2 counts per
+  millisecond, which matches the 2.095 counts/sample measured independently
+  through the MIDI port at 33⅓ RPM.
 - ✅ **Input** example: platter motion → `B0 00 vv` (deck A, CC `0x00`) /
   `B0 02 vv` (deck B, CC `0x02`), a wrapping 7-bit position counter, paired
   1:1 with a `0xE0` pitch-bend timestamp for velocity.
