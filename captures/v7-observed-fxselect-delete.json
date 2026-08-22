@@ -1,0 +1,94 @@
+﻿{
+    "label":  "fxselect-delete",
+    "seconds":  300,
+    "totalMessages":  656,
+    "confirmed":  [
+                      {
+                          "Key":  "B0:57",
+                          "Desc":  "CC       0x57",
+                          "Status":  176,
+                          "D1":  87,
+                          "Count":  170,
+                          "Min":  32,
+                          "Max":  61,
+                          "Distinct":  30,
+                          "Expected":  "FX slider A (coarse)",
+                          "Sample":  "B0 57 20|B0 57 20|B0 57 20|B0 57 20|B0 57 21|B0 57 21|B0 57 21|B0 57 21"
+                      },
+                      {
+                          "Key":  "B0:77",
+                          "Desc":  "CC       0x77",
+                          "Status":  176,
+                          "D1":  119,
+                          "Count":  170,
+                          "Min":  0,
+                          "Max":  127,
+                          "Distinct":  93,
+                          "Expected":  "FX slider A (fine)",
+                          "Sample":  "B0 77 61|B0 77 63|B0 77 69|B0 77 77|B0 77 0C|B0 77 23|B0 77 41|B0 77 53"
+                      },
+                      {
+                          "Key":  "B0:45",
+                          "Desc":  "CC       0x45",
+                          "Status":  176,
+                          "D1":  69,
+                          "Count":  83,
+                          "Min":  0,
+                          "Max":  120,
+                          "Distinct":  61,
+                          "Expected":  "strip search A",
+                          "Sample":  "B0 45 5D|B0 45 5F|B0 45 5D|B0 45 5B|B0 45 58|B0 45 56|B0 45 55|B0 45 53"
+                      },
+                      {
+                          "Key":  "90:12",
+                          "Desc":  "NoteOn   0x12",
+                          "Status":  144,
+                          "D1":  18,
+                          "Count":  8,
+                          "Min":  0,
+                          "Max":  127,
+                          "Distinct":  2,
+                          "Expected":  "SHIFT A",
+                          "Sample":  "90 12 7F|90 12 00|90 12 7F|90 12 00|90 12 7F|90 12 00|90 12 7F|90 12 00"
+                      },
+                      {
+                          "Key":  "B0:5A",
+                          "Desc":  "CC       0x5A",
+                          "Status":  176,
+                          "D1":  90,
+                          "Count":  26,
+                          "Min":  1,
+                          "Max":  127,
+                          "Distinct":  2,
+                          "Expected":  "FX select",
+                          "Sample":  "B0 5A 7F|B0 5A 01|B0 5A 7F|B0 5A 7F|B0 5A 7F|B0 5A 7F|B0 5A 7F|B0 5A 7F"
+                      },
+                      {
+                          "Key":  "90:53",
+                          "Desc":  "NoteOn   0x53",
+                          "Status":  144,
+                          "D1":  83,
+                          "Count":  10,
+                          "Min":  0,
+                          "Max":  127,
+                          "Distinct":  2,
+                          "Expected":  "FX SELECT A",
+                          "Sample":  "90 53 7F|90 53 00|90 53 7F|90 53 00|90 53 7F|90 53 00|90 53 7F|90 53 00"
+                      },
+                      {
+                          "Key":  "B0:56",
+                          "Desc":  "CC       0x56",
+                          "Status":  176,
+                          "D1":  86,
+                          "Count":  187,
+                          "Min":  1,
+                          "Max":  127,
+                          "Distinct":  4,
+                          "Expected":  "FX parameter",
+                          "Sample":  "B0 56 7F|B0 56 7F|B0 56 7F|B0 56 7F|B0 56 7F|B0 56 7F|B0 56 7F|B0 56 7F"
+                      }
+                  ],
+    "undocumented":  [
+
+                     ]
+}

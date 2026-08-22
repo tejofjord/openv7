@@ -75,10 +75,11 @@ Deck B = deck A + `0x21`, **measured** — with the A/B switch moved mid-capture
 PLAY appeared as both `0x11` and `0x32`, CUE as `0x10`/`0x31`, SYNC as
 `0x0F`/`0x30`, and the hot cues as `0x13`–`0x17` / `0x34`–`0x38`.
 
-**Every address below has been seen on the wire except the five listed above**
-(`0x12` SHIFT A, `0x42` MOTOR ON/OFF B, `0x53` FX SELECT A, `0x7D` DECK SELECT R).
-The Mixxx key names remain the source for *what each control does*; the "likely
-control" column is inference from those names and is **not** authoritative.
+**Every address below has been seen on the wire**, with the single exception of
+`0x7D`, which the evidence says is a phantom rather than a gap (see below). The
+Mixxx key names remain the source for *what each control does*; the "likely
+control" column is inference from those names and is **not** authoritative
+— `0x12` is a case where it turned out to be wrong.
 
 **Press and release:** buttons send `90 nn 7F` down and `90 nn 00` up —
 note-on with zero velocity, **never** note-off `0x80` ✅. Code that listens for
@@ -89,7 +90,7 @@ note-on with zero velocity, **never** note-off `0x80` ✅. Code that listens for
 | `0x0F` | `0x30` | `beatsync` | SYNC |
 | `0x10` | `0x31` | `cue_default` | CUE |
 | `0x11` | `0x32` | `Play` | PLAY / PAUSE |
-| `0x12` | `0x33` | `Shift` | SHIFT |
+| `0x12` | `0x33` | `Shift` | **DELETE** (SHIFT is its alt function) |
 | `0x13`–`0x17` | `0x34`–`0x38` | `Hot1`–`Hot5` | **HOT CUE 1–5** |
 | `0x18` | `0x39` | `rate_temp_down` | PITCH BEND − |
 | `0x19` | `0x3A` | `rate_temp_up` | PITCH BEND + |
@@ -121,7 +122,8 @@ Non-deck buttons:
 | `0x52` / `0x59` | `flanger` ch1 / ch2 | FX ON A / B |
 | `0x53` / `0x5A` | `FxSelect` | FX SELECT |
 | `0x54` / `0x5B` | `MasterL` / `MasterR` | MASTER L / R |
-| `0x5C` / `0x7D` | `DeckSelectL` / `DeckSelectR` | DECK SELECT L / R |
+| `0x5C` | `DeckSelectL` | **A/B switch event** (fires both directions; position is `B0 7D`) |
+| `0x7D` | `DeckSelectR` | ⚠️ **phantom** — no such control on a V7 |
 
 ---
 
@@ -264,18 +266,42 @@ documented addresses appeared**, and — worth noting — the device emitted
 **nothing outside the documented set**, so the cross-referenced map contains no
 phantom entries.
 
-Five have not been seen:
+**88 of the 89 have now been seen on the wire.** The single exception is
+`90 7D` "DECK SELECT R", and the evidence says it is a **phantom** rather than a
+gap — see the deck-select section below.
 
-| Address | Control | Note |
-|---|---|---|
-| `90 12` | SHIFT A | SHIFT B (`0x33`) confirmed, so the control exists |
-| `90 53` | FX SELECT A | FX ON A (`0x52`) confirmed |
-| `90 7D` | DECK SELECT R | |
-| `B0 56` | FX parameter | the `0x58` variant is confirmed |
-| `90 42` | MOTOR ON/OFF B | needs the A/B switch in the B position |
+### The A/B switch — `90 5C` and `B0 7D` ✅
 
-These are almost certainly correct but simply were not pressed; none of them is
-contradicted by anything observed.
+Flipping the rear-panel switch produces, in one burst:
+
+```
+90 5C 7F      deck-select event      (and 90 5C 00 on release)
+B0 7D 01      switch POSITION        00 = deck A, 01 = deck B
+B0 4D / 4F / 59 / 79 / 4E ...        state dump of the new deck's controls
+```
+
+Three things follow:
+
+- **`90 5C` is not "deck select LEFT".** It fires in *both* directions — it was
+  observed when switching **to B**. It is the switch *event*; the resulting
+  position is reported separately by `B0 7D`.
+- **`90 7D` "DECK SELECT R" therefore has nothing to press.** A V7 has one
+  switch, not a left and a right button. That entry was almost certainly
+  inherited from the NS7, which does have two decks. Treat it as a phantom.
+- **`B0 7D` is not a heartbeat.** PROTOCOL.md recorded `B0 7D` as idle chatter;
+  it is the deck-position report.
+
+**Flipping the switch also dumps control state.** The device re-reports the
+current position of every continuous control in the newly selected deck's
+address block. That is the only occasion on which the V7 volunteers control
+state without the control being moved, and it is how a host can learn fader and
+knob positions at startup.
+
+### `0x12` / `0x33` is the DELETE button, not "SHIFT"
+
+The Mixxx mapping names these `Shift`. On the V7's panel the button is labelled
+**DELETE**, with SHIFT printed above it as its alternate function. Same physical
+key, but anyone mapping "SHIFT" will hunt for a button that is not labelled that.
 
 ## Why the LED labels are still 🔬
 
