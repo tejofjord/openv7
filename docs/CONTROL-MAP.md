@@ -364,6 +364,20 @@ Two protocol features make this workable rather than a hack:
 The limit is physical, not protocol: one platter and one pitch fader means four
 *mappable targets you switch between*, not four you can operate at once.
 
+### ✅ SHIFT is not a firmware layer — the host must implement it
+
+Tested by holding SHIFT and pressing PLAY, CUE, two hot cues, LOOP IN and FX ON.
+Every one produced its **normal** address (`0x32`, `0x31`, `0x34`, `0x35`,
+`0x49`, `0x59`) and **no new addresses appeared at all**.
+
+So the device does not remap anything while SHIFT is held. It is an ordinary
+button that reports its own press and release like any other; a host wanting a
+shift layer has to track that state and interpret combinations itself.
+
+Worth stating explicitly because the opposite is a reasonable assumption — many
+controllers *do* expose a shifted address space, and someone could spend a while
+hunting for one here.
+
 ### `0x12` / `0x33` is the DELETE button, not "SHIFT"
 
 The Mixxx mapping names these `Shift`. On the V7's panel the button is labelled

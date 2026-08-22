@@ -1,0 +1,83 @@
+﻿<svg xmlns="http://www.w3.org/2000/svg" width="960" height="859" viewBox="0 0 960 859">
+  <defs>
+    <style>
+      .panel { fill:#1b1d21; stroke:#4a4f57; stroke-width:2; }
+      .slot  { fill:#0e1013; stroke:#5c636d; }
+      .metal { fill:none; stroke:#9aa3ad; stroke-width:3; }
+      .ctl   { fill:#2a2e34; stroke:#565c65; stroke-width:1.5; }
+      .led   { fill:#ff3b30; stroke:#ffb3ae; stroke-width:1; }
+      .lbl   { fill:#8b939d; font-family:Consolas,monospace; font-size:11px; }
+      .ledlbl{ fill:#ffd9d6; font-family:Consolas,monospace; font-size:10px; }
+      .title { fill:#e6e9ed; font-family:Segoe UI,sans-serif; font-size:18px; font-weight:600; }
+    </style>
+  </defs>
+  <rect x="0" y="0" width="960" height="859" fill="#0b0c0e"/>
+  <rect class="panel" x="30" y="30" width="900" height="799" rx="10"/>
+  <circle class="metal" cx="486.2" cy="402.8" r="230.8"/>
+  <circle cx="486.2" cy="402.8" r="198.5" fill="#141619" stroke="#3a3f46" stroke-width="1"/>
+  <circle cx="486.2" cy="402.8" r="69.2" fill="#7d2b2b" stroke="#a33" stroke-width="1"/>
+  <text class="lbl" x="486.2" y="497.1" text-anchor="middle">PLATTER</text>
+  <rect x="795.9" y="300.6" width="63.3" height="209.4" rx="4" fill="#0e1013" stroke="#5c636d" stroke-width="1.5"/>
+  <text class="lbl" x="827.5" y="538" text-anchor="middle">STRIP SEARCH</text>
+  <rect x="236" y="644.4" width="238.6" height="52.6" rx="4" fill="#0e1013" stroke="#5c636d" stroke-width="1.5"/>
+  <text class="lbl" x="355.3" y="725" text-anchor="middle">PITCH FADER</text>
+  <rect x="148.4" y="281.1" width="58.4" height="253.3" rx="4" fill="#0e1013" stroke="#5c636d" stroke-width="1.5"/>
+  <rect x="683.9" y="563.6" width="136.3" height="155.9" rx="4" fill="#0e1013" stroke="#5c636d" stroke-width="1.5"/>
+  <circle class="led" cx="748.2" cy="641.5" r="5"/>
+  <text class="ledlbl" x="756.2" y="645.5">0x03</text>
+  <circle class="led" cx="748.2" cy="706.8" r="5"/>
+  <text class="ledlbl" x="756.2" y="710.8">0x04</text>
+  <circle class="led" cx="749.1" cy="590.8" r="5"/>
+  <text class="ledlbl" x="757.1" y="594.8">0x05</text>
+  <circle class="led" cx="169.8" cy="333.7" r="5"/>
+  <text class="ledlbl" x="177.8" y="337.7">0x07</text>
+  <circle class="led" cx="170.7" cy="407.7" r="5"/>
+  <text class="ledlbl" x="178.7" y="411.7">0x08</text>
+  <circle class="led" cx="170.7" cy="499.3" r="5"/>
+  <text class="ledlbl" x="178.7" y="503.3">0x09</text>
+  <circle class="led" cx="230.1" cy="265.5" r="5"/>
+  <text class="ledlbl" x="238.1" y="269.5">0x0A</text>
+  <circle class="led" cx="232.1" cy="335.6" r="5"/>
+  <text class="ledlbl" x="240.1" y="339.6">0x0B</text>
+  <circle class="led" cx="233.1" cy="390.2" r="5"/>
+  <text class="ledlbl" x="241.1" y="394.2">0x0C</text>
+  <circle class="led" cx="234" cy="446.7" r="5"/>
+  <text class="ledlbl" x="242" y="450.7">0x0D</text>
+  <circle class="led" cx="234" cy="502.2" r="5"/>
+  <text class="ledlbl" x="242" y="506.2">0x0E</text>
+  <circle class="led" cx="236" cy="554.8" r="5"/>
+  <text class="ledlbl" x="244" y="558.8">0x0F</text>
+  <circle class="led" cx="508.6" cy="107.7" r="5"/>
+  <text class="ledlbl" x="516.6" y="111.7">0x11</text>
+  <circle class="led" cx="731.6" cy="102.8" r="5"/>
+  <text class="ledlbl" x="739.6" y="106.8">0x13</text>
+  <circle class="led" cx="731.6" cy="156.4" r="5"/>
+  <text class="ledlbl" x="739.6" y="160.4">0x14</text>
+  <circle class="led" cx="818.3" cy="126.2" r="5"/>
+  <text class="ledlbl" x="826.3" y="130.2">0x15</text>
+  <circle class="led" cx="731.6" cy="217.8" r="5"/>
+  <text class="ledlbl" x="739.6" y="221.8">0x16</text>
+  <circle class="led" cx="731.6" cy="272.3" r="5"/>
+  <text class="ledlbl" x="739.6" y="276.3">0x17</text>
+  <circle class="led" cx="818.3" cy="245" r="5"/>
+  <text class="ledlbl" x="826.3" y="249">0x18</text>
+  <circle class="led" cx="775.4" cy="103.8" r="5"/>
+  <text class="ledlbl" x="783.4" y="107.8">0x19</text>
+  <circle class="led" cx="773.5" cy="165.2" r="5"/>
+  <text class="ledlbl" x="781.5" y="169.2">0x1A</text>
+  <circle class="led" cx="773.5" cy="217.8" r="5"/>
+  <text class="ledlbl" x="781.5" y="221.8">0x1B</text>
+  <circle class="led" cx="773.5" cy="272.3" r="5"/>
+  <text class="ledlbl" x="781.5" y="276.3">0x1C</text>
+  <circle class="led" cx="348" cy="643.4" r="5"/>
+  <text class="ledlbl" x="356" y="647.4">0x37</text>
+  <circle class="led" cx="328.5" cy="645.4" r="5"/>
+  <text class="ledlbl" x="336.5" y="649.4">0x3E</text>
+  <circle class="led" cx="330.4" cy="543.1" r="5"/>
+  <text class="ledlbl" x="338.4" y="547.1">0x4A</text>
+  <circle class="led" cx="326.5" cy="530.4" r="5"/>
+  <text class="ledlbl" x="334.5" y="534.4">0x57</text>
+  <text class="title" x="30" y="20">Numark V7 - panel layout</text>
+  <text class="lbl" x="280" y="20">27 LED positions measured by camera - proportions from photographs</text>
+</svg>
+
