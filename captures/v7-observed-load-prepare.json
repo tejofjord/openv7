@@ -1,0 +1,22 @@
+﻿{
+    "label":  "load-prepare",
+    "seconds":  40,
+    "totalMessages":  4,
+    "confirmed":  [
+                      {
+                          "Key":  "90:0D",
+                          "Desc":  "NoteOn   0x0D",
+                          "Status":  144,
+                          "D1":  13,
+                          "Count":  4,
+                          "Min":  0,
+                          "Max":  127,
+                          "Distinct":  2,
+                          "Expected":  "LOAD",
+                          "Sample":  "90 0D 7F|90 0D 00|90 0D 7F|90 0D 00"
+                      }
+                  ],
+    "undocumented":  [
+
+                     ]
+}

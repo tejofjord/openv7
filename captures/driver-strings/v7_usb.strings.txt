@@ -1,0 +1,1138 @@
+﻿--------------------------------
+   deviceRequest Callresult:%08X iRetry:%d URB-status:%08X
+------------ CALLING RESTART DEVICE
+ HcD$
+ HcL$ H
+!pcFile || !pcFile->m_bIsFileReady
+!This program cannot be run in DOS mode.
+"http://crl.globalsign.net/root.crl0
+#$PTASIONAMESTRT$#--------------------------------#$PTASIONAMESTOP$#
+$HcL$
+$HcT$
+&0$0"
+&https://www.globalsign.com/repository/0
+&https://www.globalsign.com/repository/03
+(((((((
+(((((((((((
+((((((((((( (((!((("(((#((($(((%(((&((('
+(((((((((((((((((((
+(((((((((((((((((((((((
+(((((((((((((((((((((((((((((((((((
+(http://ocsp2.globalsign.com/gscodesigng20
+*** SETFREQ IN :%d
+*** SETFREQ OUT :%d
+*** VENDOR_HANPIN,PROD_HANPIN_ELECTRIX_EBOX44
+***** Device Frequency mismatch expected:%d current:%d 
+***** DOTEC dlf:%d freq:%d in:%d out:%d 
+***** Invalid IRQ Level in bool KernelThreadBank::init
+***** USBMidiPattern::initForBulk sr:%d rtsBulkOutFramesPerBlock:%d
+*************** rtsProcessBulkIn iProcessBlockUntil == BULK_AUDIO_PACKETS && pAudioBulkIRP->mProcessedBlockA == 0
+*************** rtsProcessBulkOut: iProcessBlockUntil == BULK_AUDIO_PACKETS && pAudioBulkIRP->mProcessedBlockA == 0
+***************** USBMidiPattern::initForBulk sr:%d iCalc:%d
+******************** ENTER m_cKernelDevice.dispatchHandleStreamBroken()
+******************** EXIT m_cKernelDevice.dispatchHandleStreamBroken()
+,0*0(
+,HcT$(H
+... modified mixer data
+... modified premixer
+...!mpDriverSM
+...2 channel out mode - use mapping converter
+...4 channel in mode - use default converter
+...4 channel out mode - use default converter
+...4 channel out mode - use mapping converter
+...4 channel out only
+...4/4 Mode
+...6 channel in mode - default converter
+...6 channel out mode - use default converter
+...crimson 4 channel out mode - use mapping converter
+...for descriptor update
+...found pending PGIsocRB
+...get device descriptor returned %08X
+...ignore some switches...
+...leave device removal in progress
+...m_bSurpriseRemovalCalled
+...mMaxFrames is nMaxSamples,mChannelsPerFrame:%d mChannelsPerFrame:%d
+...MmMapLockedPagesSpecifyCache exception
+...mUs3xxData 4 ChannelOutMode
+...mUs3xxData 6/2 Mode
+...mUs3xxData.is6ChannelOutMode()
+...mUs3xxData.isStereoMixMode()
+...not supported
+...pending isoc countUsed:%d
+...read failed at %08X len:%08X
+...read from %08X %p %d
+...RegValue not written
+...RegValue not written - STATUS_INVALID_PARAMETER
+...RegValue not written - STATUS_OBJECT_NAME_NOT_FOUND
+...REMOVE MIDI
+...REMOVE WDM
+...stereo mix mode
+...StereoMixMode
+...success id:%08X
+...US1200 StereoMixMode
+...write at %08X %p
+...write failed at %08X
+...xmos get frequency returns:%08X
+...xmos set frequency returns:%08X
+..need to unmap memory
+.http://crl.thawte.com/ThawteTimestampingCA.crl0
+.pdata
+.rsrc
+.text
+/Pz0G
+/V.?.
+;D$8u
+;D$Htj
+;D$Lv)H
+;D$xu
+?+.cJ
+@ 9D$
+@@9D$d
+@@9D$l
+@0>0<
+@49D$|vMH
+@89D$ 
+@B*Xmj
+@B9D$Hv
+@D9A0
+@D9D$0
+@D9D$0s
+@D9D$0s;D
+@D9D$0sN
+@H9AHu
+@P9APt
+\$$HcL$ Hk
+\CONTROL
+\f,{*
+\FW_UPDATE
+\IO_ASIO
+\IO_SINGLE_INSTANCE
+\REGISTRY\Machine\System\CurrentControlSet\SERVICES\NUMARK_V7_USB
+\REGISTRY\Machine\System\CurrentControlSet\SERVICES\NUMARK_V7_USB\Parameters
+\REGISTRY\Machine\System\CurrentControlSet\SERVICES\NUMARK_V7_USB\Parameters\
+\REGISTRY\Machine\System\CurrentControlSet\SERVICES\NUMARK_V7_USB\Parameters\MME
+\REGISTRY\Machine\System\CurrentControlSet\SERVICES\NUMARK_V7_USB\ParametersXCorpio\
+\REGISTRY\Machine\System\CurrentControlSet\SERVICES\NUMARK_V7_USB\US366\
+\REGISTRY\Machine\System\CurrentControlSet\SERVICES\NUMARK_V7_USB\WM8776_1
+\REGISTRY\Machine\System\CurrentControlSet\SERVICES\NUMARK_V7_USB\WM8776_2
+\vnO^
+]jxdE
+__C_specific_handler
+_HcL$HHk
+|$  }
+|$  }!H
+|$ dr.H
+|$( }P
+|$, }<HcL$,H
+|$, t
+|$@ t
+|$` ~
+|$`)}?HcL$`H
+|$< t
+|$0 t
+|$4 t
+|$8 }
+|$8 ~
+|$8 t
+|$8?~
+|$8d~
+|$8H~
+|$D t
+|$H t
+} HcL$(Hi
+} HcL$XHi
+}"HcL$ Hk
+})HcD$ Hk
+}.HcD$ H
+}.HcL$$H
+}.LcD$ Mk
+}:HcT$XHk
+}`HcL$ H
+}`HcT$ H
+}<HcL$0Hi
+}7HcL$ Hk
+}9HcL$0Hi
+}FHcL$ Hi
+}IHcL$ H
+}IHcL$@H
+}MLcD$ Mk
+}rHcL$ H
+}VHcL$ Hk
++D$ Hc
++http://ts-aia.ws.symantec.com/tss-ca-g2.cer0<
++http://ts-crl.ws.symantec.com/tss-ca-g2.crl0(
++readUC3UserFlash from %08X
++Symantec Time Stamping Services Signer - G40
++writeUC3UserFlash at %08X
++wrong address
+<$ }AHc
+</assembly>PAPADDINGXXPADDINGPADDINGXXPADDINGPADDINGXXPADDINGPADDINGXXPADDINGPADDINGXXPADDINGPADDINGXXPADDINGPADDINGXXPADDINGPADDINGXXPADDINGPADDINGXXPADDINGPADDINGXXPADDINGPADDINGXXPADDINGPADDINGXXPADDINGPADDINGXXPADDINGPADDINGXXPADDINGPADDINGXXPADDINGPADDINGXXPADDINGPADDINGXXPADDINGPADDINGXXPADDINGPADDINGXXPADDINGPADDINGXXPADDINGPADDINGXXPADDINGPADDINGXXPADDINGPADDINGXXPADDINGPADDINGXXPADDINGPADDINGXXPADDINGPADDINGX
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+>"hcS
+000004b0
+0g0Q1
+0r0^1
+1.0 kHz
+1.0:1
+1.00 kHz
+1.07 kHz
+1.1 kHz
+1.1:1
+1.15 kHz
+1.2 kHz
+1.23 kHz
+1.3 kHz
+1.3:1
+1.32 kHz
+1.4 kHz
+1.41 kHz
+1.5 kHz
+1.5:1
+1.52 kHz
+1.6 kHz
+1.62 kHz
+1.7 kHz
+1.7:1
+1.74 kHz
+1.8 kHz
+1.87 kHz
+1.9 kHz
+10.0 kHz
+100 Hz
+11.0 kHz
+110413100000Z
+12.0 kHz
+120 Hz
+121018000000Z
+121221000000Z
+125 Hz
+13.0 kHz
+131204124756Z
+14.0 kHz
+140523151517Z0#
+15.0 kHz
+150 Hz
+16.0 kHz
+16.0:1
+16.00
+16:11:26
+17.0 kHz
+170109173358Z0
+175 Hz
+18.0 kHz
+190413100000Z0Q1
+2.0 kHz
+2.0:1
+2.00 kHz
+2.14 kHz
+2.2 kHz
+2.30 kHz
+2.4 kHz
+2.46 kHz
+2.5:1
+2.6 kHz
+2.64 kHz
+2.8 kHz
+2.83 kHz
+200 Hz
+201229235959Z0b1
+201230235959Z0^1
+20402
+225 Hz
+250 Hz
+3.0 kHz
+3.0:1
+3.03 kHz
+3.2 kHz
+3.25 kHz
+3.4 kHz
+3.48 kHz
+3.5:1
+3.6 kHz
+3.73 kHz
+3.8 kHz
+300 Hz
+32 Hz
+350 Hz
+3HcT$(H
+4.0 kHz
+4.0:1
+4.00 kHz
+4.5 kHz
+40 Hz
+400 Hz
+450 Hz
+4HcT$(Hk
+4http://secure.globalsign.com/cacert/gscodesigng2.crt04
+5.0 kHz
+5.0:1
+5.5 kHz
+50 Hz
+500 Hz
+50301
+6.0 kHz
+6.0:1
+6.5 kHz
+60 Hz
+600 Hz
+6HcD$@
+7.0 kHz
+7.5 kHz
+70 Hz
+700 Hz
+70503
+8.0 kHz
+8.0:1
+80 Hz
+800 Hz
+80604
+850 Hz
+9.0 kHz
+90 Hz
+900 Hz
+950 Hz
+9A$v1H
+9A,v 
+9A,v#
+9D$ }
+9D$ })HcL$ Hk
+9D$ };HcL$ H
+9D$ }^H
+9D$ }=H
+9D$ }1HcL$ Hk
+9D$ }DHcL$ Hk
+9D$ s
+9D$ s!H
+9D$$},HcT$$H
+9D$$}KHcL$$Hk
+9D$(|;H
+9D$(t
+9D$(v
+9D$,}A
+9D$,r
+9D$@v6H
+9D$<r
+9D$0}]HcL$0Hk
+9D$0r~
+9D$0rb
+9D$0s
+9D$0v
+9D$4r
+9D$4w
+9D$8}gHcL$8H
+9D$8r
+9D$8sO
+9D$8ss
+9D$8sU
+9D$8v6H
+9D$8w
+9D$8w*H
+9D$H}
+9D$h}yHcL$hHi
+9D$Hs
+9D$HsI
+9D$Hu
+9D$ls8
+9D$xu!
+A[AZAY_^[XAX
+ADC_BOOST
+ADC_BOOST:%X VOLUME_OUT_L:0x%X VOLUME_OUT_R:0x%X VOLUME_ADC:0x%X VOLUME_MONITOR:0x%X
+AJ::inACR_M4_M4_C1
+AJ::us366ParseMidi puChar[0] is %02X 
+AJ::us366ParseMidi puChar[1] is %02X 
+ALERT MmAllocateContiguousMemory failed
+ALERT mRtsBulkOutFramesPerBlock==0
+ALERT PHYSICAL_ADDRESS :%p sys:%p
+ALERT: pUrb->UrbControlVendorClassRequest.TransferBufferLength(%d) > uLength(%d)
+Analog
+Analog4: config:%d freq:%d in:%d/%d out:%d/%d
+ANALOG4_CHANNEL_MAP_IN
+ANALOG4_CHANNEL_MAP_OUT
+APPSVWAQARASH3
+ASSERT PGSubDeviceExtension::removeDevice() IRQL is %d
+ASSERT processedBlock:%d blockMin:%d
+assign interfaces for VENDOR_ELEKTRON,PROD_ELEKTRON_ANALOG_FOUR
+AudioSM::init nChannels is %d
+AudioSM::init nChannels is 0
+AudioSM::init nUsedSamples != nMaxSamples %d - %d
+Audiotrack
+Aureon 5.1
+B.reloc
+Baden-Wuerttemberg1
+before IoCallDriver cycle port
+BufferSize
+BulkRB::BulkRB(void* pOwner,maxPaketSize:%d,char stackSize)
+calling xmos get frequency
+calling xmos set frequency
+CAUGHT EXCEPTION IN PGSubDeviceExtension::removeDevice()
+CFo~(DP
+changed channels.uConfiguration to:%d
+Check
+CHECK USB::buildDummyDescriptor
+choose usbDecode16MSB as input decoder for Elektron
+choose usbDecode24_HML as input decoder
+choose usbEncode16MSB as output encoder
+choose usbEncode24_HML as output encoder
+chooseDMADecoder for PROD_PLOYTEC_DOTEC_i64_USB chan:%d
+chooseDMAEncoder for PROD_PLOYTEC_DOTEC_i64_USB chan:%d
+ClockSource
+Closing Generic File
+cmpxValue is %d after pBank->doHandleStreamBroken
+Comments
+CompanyName
+Configuration
+Configuration Done
+configureDevice returned %08X
+Copyright (C) Ploytec GmbH 2000-2013
+Create MIDI Device
+Create MME Device
+CreateFile Name: %ws
+D$ 9D$
+D$ 9D$$t
+D$ AE3
+D$ BE3
+D$ E3
+D$ fA
+D$ H+
+D$ H9
+D$ H9D$Ht
+D$ HcL$@Hk
+D$ HcT$,H
+D$ IE3
+D$ ME3
+D$ RE3
+D$ rE3
+D$ TE3
+D$ UE3
+D$ VE3
+D$$9A
+D$$9D$ |
+D$$9D$,r
+D$$9D$,sc
+D$(=E
+D$(9D$
+D$(9H0
+D$(E3
+D$(H9D
+D$(HcL$(H
+D$,9D$0
+D$@9A
+D$@9D$
+D$@9D$D}
+D$`9D$H
+D$`9H$
+D$}fA
+D$09D$
+D$09D$4
+D$0D+
+D$0fA
+D$0fD
+D$0H9D$xu%H
+D$0H9D$xu'H
+D$0Hc
+D$0HcP
+D$89A
+D$89A t
+D$89D$
+D$89D$@
+D$89D$@}^H
+D$89D$@}IH
+D$89D$<}6H
+D$89D$4
+D$8fA
+D$8H9D$H~
+D$D9A
+D$d9D$`
+D$d9D$xt
+D$dfA
+D$H9A
+D$H9D$$s
+D$h9D$0rMH
+D$h9D$0t@H
+D$hfA
+D$HH9
+D$HH9D$ u
+D$HHk
+D$p;H
+D$P9D$
+D$PfA
+D$pfA
+D$pHc
+D$PHcL$HH
+D$T9A8s
+D$X;H
+D$xfA
+D$xH=
+D$XH9
+D$xH9
+D$XH9D
+D$xHcL$dHi
+DbgPrint
+deviceSettingsInit
+deviceSettingsSetDefaults
+DevIO::initHardware sw_channels:%d hw_channels:%d hw_bits:%d
+Digital
+digital locked at %d 
+Digital Sound Station
+DigitalOutMode
+DigitalOutSelector
+DIQ%z
+DONE USB::buildDummyDescriptor
+Driver Opened**************************
+DriverEntry %s (USB) %s built:%s - %s
+DRIVERSETUP_REENUM
+DRIVERSETUPACTIVE
+Durbanville1
+dyn effect changed...
+dyn effect changed...but on-off stage is skipped
+dyn effect off
+dyn effect on...
+dyn effect switched within limiter / lowcut
+E0C0A
+elapsed millis:%d
+END PGIOCTL_REGISTER_APC_BS
+END PGIOCTL_REGISTER_APC_Notify
+enter KernelThreadBank::Thread::loop()
+ENTER PGIOCTL_REGISTER_APC_BS
+ENTER PGIOCTL_REGISTER_APC_Notify
+ENTER USB::buildDummyDescriptor
+EPT_SetCurrentConfig
+error mMaxFrames is nMaxSamples,mChannelsPerFrame:%d mChannelsPerFrame:%d
+Error: sPGIOCTL_STD_VENDOR_REQUEST STATUS_INVALID_PARAMETER_3 uBufferLength:%d VENDOR_OR_CLASS_REQUEST:%d
+EsuCPLDByte
+ExAllocatePool
+ExFreePoolWithTag
+exit KernelThreadBank::Thread::loop()
+f3?0<GS
+failed to measure digital input samplerate
+FEEDBACK FramePattern Locked
+FEEDBACK FramePattern Lost Sync
+fffff
+ffffff
+fffffff
+FileDescription
+FileVersion
+FindInterfaces(%d) fr:%d in:%d/%d out:%d/%d
+findInterfacesInConfig0 fr:%d in:%d/%d out:%d/%d
+findInterfacesInConfig1 fr:%d in:%d/%d out:%d/%d
+FootSwitchFunction
+FootSwitchMode
+Found File to attach
+found jct192 or compatible
+FPO frame not aligned - received %d bytes
+FPO frame not aligned - received:%d expected:%d
+FramePattern Locked - reset nErrorCounter
+Frequency
+FWUPDATER
+g0e0*
+getConfigurationDescriptor(%d) returned:%p
+GlobalSign CodeSigning CA - G2
+GlobalSign CodeSigning CA - G20
+GlobalSign nv-sa1
+GlobalSign nv-sa1'0%
+GlobalSign Root CA0
+H.data
+h.rdata
+H9D$(t
+H9D$(u Hc
+H9D$`u
+H9D$`u/H
+H9D$HubHcL$ Hi
+H9D$Pu
+H9D$pu2H
+H9D$Xu
+H9D$XuWH
+H9H8v1
+HAL.DLL
+Hc\$@H
+HcD$ 
+HcD$ H
+HcD$ Hk
+HcD$$H
+HcD$,Hi
+HcD$@
+HcD$@H
+HcD$<
+HcD$8H
+HcD$D
+HcD$DH
+HcD$hH
+HcD$P
+HcH0H
+HcL$ H
+HcL$ Hi
+HcL$ Hk
+HcL$(Hk
+HcL$@H
+HcL$@Hk
+HcL$`Hk
+HcL$0Hk
+HcL$4
+HcL$4H
+HcL$8H
+HcL$8Hk
+HcL$D
+HcL$dHi
+HcL$dHk
+HcL$HH
+HcL$hHi
+HcL$HHk
+HcL$lHk
+HcL$P
+HcL$pH
+HcL$XH
+HcL$XHk
+HcT$ H
+HcT$ Hk
+HcT$(H
+HcT$dHi
+HcT$HH
+HcT$pH
+Hercules
+highspeed
+HINIT
+HP 1+2
+HP 3+4
+-http://crl.globalsign.com/gs/gscodesigng2.crl0
+http://ocsp.thawte.com0
+http://ts-ocsp.ws.symantec.com07
+In 1+2
+In 1+3 2+4
+In 3+4
+InChannels
+inf:1
+info@ploytec.com0
+INIT XMOS IN
+INIT XMOS OUT
+InitFramePattern freq:%d bpsin:%d chin:%d bpsout:%d chout:%d
+initNextTransactionIn to late current:%d diff:%d NTF:%d lostFrames:%d
+initNextTransactionKeepAlive CALLBACK to late current:%d diff:%d NTF:%d lostFrames:%d
+initNextTransactionOut to late current:%d diff:%d NTF:%d lostFrames:%d
+Input
+input postprocessor: change routing for crumar
+InputMonitoringASIOControlled
+InputMonitoringOn
+InResolution
+InSelection
+InternalName
+INVALID IRQL %d in USB::sendAndWait
+IoAllocateIrp
+IoAllocateMdl
+IoAttachDeviceToDeviceStack
+IoBuildDeviceIoControlRequest
+IoCallDriver cycle port returned :%08X
+IoCancelIrp
+IoCreateDevice
+IoDeleteDevice
+IoDetachDevice
+IofCallDriver
+IofCompleteRequest
+IoFreeIrp
+IoFreeMdl
+IoInvalidateDeviceRelations
+IoRegisterDeviceInterface
+IoSetDeviceInterfaceState
+IRP_MN_CANCEL_REMOVE_DEVICE         
+IRP_MN_CANCEL_STOP_DEVICE           
+IRP_MN_DEVICE_USAGE_NOTIFICATION    
+IRP_MN_EJECT                        
+IRP_MN_FILTER_RESOURCE_REQUIREMENTS 
+IRP_MN_QUERY_BUS_INFORMATION        
+IRP_MN_QUERY_CAPABILITIES           
+IRP_MN_QUERY_DEVICE_RELATIONS       
+IRP_MN_QUERY_DEVICE_RELATIONS Force Reenumerate(DRIVERSETUP_REENUM)
+IRP_MN_QUERY_DEVICE_RELATIONS Setup:%d
+IRP_MN_QUERY_DEVICE_TEXT            
+IRP_MN_QUERY_ID                     
+IRP_MN_QUERY_INTERFACE              
+IRP_MN_QUERY_PNP_DEVICE_STATE       
+IRP_MN_QUERY_REMOVE_DEVICE          
+IRP_MN_QUERY_RESOURCE_REQUIREMENTS  
+IRP_MN_QUERY_RESOURCES              
+IRP_MN_QUERY_STOP_DEVICE            
+IRP_MN_READ_CONFIG                  
+IRP_MN_REMOVE_DEVICE
+IRP_MN_REMOVE_DEVICE                
+IRP_MN_SET_LOCK                     
+IRP_MN_START_DEVICE                 
+IRP_MN_STOP_DEVICE
+IRP_MN_STOP_DEVICE                  
+IRP_MN_SURPRISE_REMOVAL
+IRP_MN_SURPRISE_REMOVAL             
+IRP_MN_WRITE_CONFIG                 
+ISO OUT ENCODER PROD_TEAC_UH7000 
+ISO OUT ENCODER PROD_TEAC_US366 
+ISOC FEEDBACK CALLBACK to late current:%d diff:%d NTF:%d lostFrames:%d
+isocReadCompleteFeedback-ISOC_FEEDBACK_MAX_ERR
+Jambox Settings
+KeAcquireSpinLockRaiseToDpc
+KeAPC_Info::registerAPC already registered - exit
+KeAPC_Info::registerAPC init
+KeAPC_Info::registerAPC -use threaded method
+KeAPC_Info::trigger
+KeAPC_Info::trigger - NO NOTIFY ACTION DONE
+KeAPCData::create - !Thread || !pFunction
+KeAPCData::create - already created
+KeAPCData::create - out of memory
+KeAPCData::create - success
+KeClearEvent
+KeDispatchIOIncDec::lock - already locked
+KeDispatchIOIncDec::lock - pKDEV is NULL
+KeDispatchLock::lock - already locked
+KeDispatchLock::lock - IRQ Level is %d - no Mutex %s
+KeDispatchLock::lock - KeWaitForMutexObject failed with status 0x%08X
+KeDispatchLock::lock - pKDEV is NULL
+KeDispatchLock::lock(%s) - done waiting
+KeDispatchLock::lock(%s) - Mutex appears to be locked i'm waiting...
+KeFile::getNotificationCode returned :%d
+KeInitializeApc
+KeInitializeDpc
+KeInitializeEvent
+KeInitializeMutex
+KeInsertQueueApc
+KeInsertQueueDpc
+KeQueryPerformanceCounter
+KeQueryPriorityThread
+KeReleaseMutex
+KeReleaseSpinLock
+KernelThreadBank::doHandleStreamBroken - ...locked
+KernelThreadBank::doHandleStreamBroken - processing
+KernelThreadBank::queueHandleStreamBroken - already queued or currently processing
+KernelThreadBank::queueHandleStreamBroken - queued
+KernelThreadBank::setRtsFunc %p
+KernelThreadBank::Thread::run
+KernelThreadBank::threadedHandleStreamBroken
+KeSetEvent
+KeSetPriorityThread
+KeWaitForEvent - invalid IRQ Level %d / timeout %d /ID %d
+KeWaitForSingleObject
+L$ fD
+L$ Hi
+L$ Hk
+L$@E3
+L$|Hk
+L$8Hk
+L$HE3
+L$HHk
+L$lHk
+L$xfA
+LAST_CONFIG_RESULT
+LAST_CONFIG_RESULT_USBD
+Lc\$ H
+Lc\$ HcT$ H
+Lc\$(H
+Lc\$@
+Lc\$@JcL
+LcD$ Mk
+LcD$dMi
+LegalCopyright
+LegalTrademarks
+LLcD$dMi
+LOAD MIXER BINARIES 322
+LOAD MIXER BINARIES 366
+LOAD MIXER BINARIES UH7000
+LOAD MIXER BINARIES US1200
+m_pcControlInterface:%p
+m_pcInInterface:%p
+m_pcMidiInterface:%p
+m_pcOutInterface:%p
+m_pcOutPipeKeepAlive is %p
+m_pcOutPipeKeepAlive->Handle is %p
+m_uAttributes: %d
+m_uClass: %d
+m_uConfiguration: %d
+m_uConfigurationValue: %d
+m_uMaxPower: %d
+m_uNumber: %d
+m_uNumEndpoints: %d
+m_uNumInterfaces: %d
+m_uProtocol: %d
+m_uStringIndex: %d
+m_uSubclass: %d
+mAPC.create success APC:%p
+Master
+May 23 2014
+Maya 5.1 USB
+mbCallbackBasedProcessing - out
+mControlFiles[i]->mpKeFile->stcNotify(what,value);
+mDeviceSpecific.initDevSpec %04X %04X  %04X %d
+mDriverSetupActive:%d
+MEDIA\NUMARKV7AUDIOADAPTER
+mFeedbackInPosToFix:%d - not possible with:%d lBase:%d uBaseExpectedLength:%d
+mFeedbackInPosToFix:%d with:%d
+mFirmwareUpdaterOpen is %d
+MicFace
+Midi Device
+miditech
+mIsoOutEncoder = usbEncode24STD_Swap;
+MIXED PROCESSING ISOC OUT and BULK IN
+MmAllocateContiguousMemorySpecifyCache
+MmAllocatePagesForMdl
+MmBuildMdlForNonPagedPool
+MmFreeContiguousMemory
+MmFreePagesFromMdl
+MmGetPhysicalAddress
+mMilliSecsWaitAfterConfig:%d
+mMilliSecsWaitAfterConfigInitial:%d
+MmMapLockedPagesSpecifyCache
+MmProbeAndLockPages
+MmUnlockPages
+MmUnmapLockedPages
+mNumAlternate: %d
+Monitor
+MonitorSelection
+mpDMAAudioInBuffer is NULL
+mUs3xxData.swStartCplState
+Muse Pocket
+must flush mcPort1
+must flush mcPort2
+MuteLIn
+MuteLOut
+MuteRIn
+MuteROut
+mWow64Event : %p
+NlsMbCodePageTag
+NO SSE2
+normal
+NotGang
+ntoskrnl.exe
+Numark V7
+ObfDereferenceObject
+ObfReferenceObject
+ObReferenceObjectByHandle
+open cpl armed
+open cpl BSTC_OpenCPL
+open cpl pressed
+open cpl released
+Optical
+Out 1+2
+Out 1+3 2+4
+out of sync during start %d errors
+OutChannels
+Output
+OutResolution
+OutSelection
+pBank->mbDisableThreadFunc
+PerformanceMode
+PGDevice::bulkAudioIn() no free-irp found
+PGDevice::bulkAudioIn() StreamingSuspended:%d bStreamingStarted:%d pipe:%p handle:%p DeviceHardwareFailure:%d
+PGDevice::bulkAudioOut() no free-irp found
+PGDevice::bulkAudioOut() StreamingSuspended:%d bStreamingStarted:%d pipe:%p handle:%p DeviceHardwareFailure:%d
+PGDevice::bulkInpEvent
+PGDevice::bulkOutEvent
+PGDevice::checkDeviceConnected - readDeviceDescriptor ntStatus:%08X
+PGDevice::configurationDone
+PGDevice::configurationDone in:%d/%d out:%d/%d
+PGDevice::createFile assign single Instance file
+PGDevice::createFile single Instance file already created
+PGDevice::deleteFile release single Instance file
+PGDevice::findInterfacesInConfig
+PGDevice::irqlOnStreamBroken from %s
+PGDevice::irqlOnStreamBroken() - IRQ Level %d below DISPATCH_LEVEL
+PGDevice::onAjInPipeHalted m_bStreamingStarted:%d mbDeviceHardwareFailure:%d
+PGDevice::onHardwareDeviceFailure - ignore during installation
+PGDevice::onLevelinfoExDetach mLevelInfoExCount is %d
+PGDevice::requestIOFeedback() no free-irp found
+PGDevice::requestIOFeedback() pcRB:%p failed
+PGDevice::requestIOKeepAlive() no free-irp found
+PGDevice::requestIsocIn() no free-irp found
+PGDevice::requestIsocInElektron() no free-irp found
+PGDevice::requestIsocOut() no free-irp found
+PGDevice::requestIsocOut_Pure() no free-irp found
+PGDevice::rtsIsocInput
+PGDevice::rtsIsocInputElektron
+PGDevice::rtsPrepareService mbDeviceHardwareFailure
+PGDevice::rtsPrepareService mRtsCurrentFrame is -1
+PGDevice::rtsPrepareService streaming not started or suspended
+PGDevice::rtsProcessBulkIn() pAudioBulkIRP is NULL
+PGDevice::rtsProcessBulkOut() pAudioBulkIRP is NULL
+PGDevice::rtsProcessIsocIn: no isoc to process
+PGDevice::rtsProcessIsocIn: pUrb is NULL
+PGDevice::rtsProcessIsocInWithRB: pUrb is NULL
+PGDevice::rtsProcessIsocInWithRBElektron: pUrb is NULL
+PGDevice::rtsProcessIsocOut numSamples is 0
+PGDevice::rtsProcessIsocOutDirect numAudioFramesProcessed is 0
+PGDevice::rtsProcessIsocOutDirectElektron numAudioFramesProcessed is 0
+PGDevice::setUSB2Device
+PGDevice::startStreaming
+PGDevice::stcNotify what:%d value:%d
+PGDevice::stopAudioRequests countUsed:%d
+PGDevice::stopStreaming() - invalid IRQ Level %d
+PGDevice::suspendStreaming() - invalid IRQ Level %d
+PGDevice::us366Mixer_2CH mDeviceData.mOuts.mSWChannels is:%d
+PGDevice::us366Mixer_4CH mDeviceData.mOuts.mSWChannels is:%d
+PGDevice::us366Mixer_6CH mDeviceData.mOuts.mSWChannels is:%d
+PGDevice::us3xxMixerEff_READ
+PGDevice::us3xxReadSwitches
+PGDevice::WM8776Get %d,%d - not loaded
+PGDevice::WM8776Get codec out of range %d
+PGDevice::WM8776Get register out of range %d
+PGDevice::WM8776Set %d,%d - not loaded
+PGDevice::WM8776Set codec out of range %d
+PGDevice::WM8776Set register out of range %d
+PGDevice::WM8776SetDefault codec out of range %d
+PGDevice::WM8776SetDefault register out of range %d
+PGDevice::WM8776SetDefault value out of range %08X
+PGDevice::WM8776Write codec out of range %d
+PGDevice::WM8776Write register out of range %d
+PGDevice::WM8776Write value out of range %08X
+PGDeviceFile::rtsAttach rtsFramePosIn:%d mTriggerFrames:%d
+PgDriverSM::create allocation failed
+PgDriverSM::fileClose file not found
+PgDriverSM::fileClose found file
+PgDriverSM::fileCreate %p
+PgDriverSM::fileCreate -no free entries
+PgDriverSM::mapToUser
+PgDriverSM::mapToUser - already mapped
+PgDriverSM::mapToUser - unknown memory type %d
+PgDriverSM::mapToUser size mismatch pBuffer->mParam2:%d cSize:%d
+PgDriverSM::term() this is NULL
+PGFramePatternObserver::isocReadComplete repair len:%d expected frames:%d new:%d
+PGIOCTL_IoInvalidateDeviceRelations mDriverSetupActive:%d
+PGIOCTL_STD_VENDOR_REQUEST deviceRequest returned:%08X
+PGIsocRB::initForStream -  not initialized
+PGKernelDevice::dispatchHandleStreamBroken
+PGKernelDevice::DISPClose
+PGKernelDevice::DISPCreate
+PGKernelDevice::DISPInternalDeviceControl
+PGKernelDevice::DISPInternalDeviceControl-MIDI
+PGKernelDevice::DISPInternalDeviceControl-MME
+PGKernelDevice::DISPIOCTL
+PGKernelDevice::DISPIOCTL - !bValidRequest
+PGKernelDevice::DISPProcessPnPIrp
+PGKernelDevice::DISPProcessPnPIrp-MIDI
+PGKernelDevice::DISPProcessPnPIrp-MME
+PGKernelDevice::DISPProcessPowerIrp
+PGKernelDevice::DISPProcessPowerIrp-MIDI
+PGKernelDevice::DISPProcessPowerIrp-MME
+PGKernelDevice::DISPProcessSysControlIrp
+PGKernelDevice::handleStreamBroken
+PGKernelDevice::isocReadComplete !m_bStreamingStarted
+PGKernelDevice::isocReadComplete ignore ISOC-RB - reconfiguration or stop streaming
+PGKernelDevice::isocReadFeedbackComplete !m_bStreamingStarted
+PGKernelDevice::isocWriteComplete !m_bStreamingStarted
+PGKernelDevice::isocWriteComplete_CallbackBased !m_bStreamingStarted
+PGKernelDevice::isocWriteComplete_Pure !m_bStreamingStarted
+PGKernelDevice::isocWriteCompleteKeepAlive !m_bStreamingStarted
+PGKernelDevice::onDoThreadedWork
+PGKernelDevice::onGenericRequest - !pBuffer 
+PGKernelDevice::onGenericRequest - !pKeFile
+PGKernelDevice::onGenericRequest - pBuffer->mSize(%d) != sizeof(PtIOCTL)(%d)
+PGKernelDevice::PwrPowerIrp_CompletionToD0
+PGKernelDevice::queryControllerInterface()
+PGKernelDevice::queryControllerInterface() m_cBusInterface0.BusContext already known
+PGKernelDevice::selectConfiguration - STATUS_INVALID_DEVICE_STATE
+PHcD$@
+PHcD$@HcL
+Phones
+pIrp->IoStatus.Information > uBufferLength uUserLength:%08X uBufferLength:%08X sizeof(VENDOR_OR_CLASS_REQUEST):%08X
+pKAPC2Term->NormalContext != (PVOID)-1
+PLcD$dMi
+Ploytec GmbH
+Ploytec GmbH1
+Ploytec USB Audio driver
+PoCallDriver
+PoCallDriver(pKDEV->m_pLowerDriver, pIrp) returned 0x%08X
+PoRequestPowerIrp
+PoSetPowerState
+PoStartNextPowerIrp
+postprocessUS144_10_NoDigital
+PrivateBuild
+PROCESSING ISOC IN
+PROCESSING ISOC IN + ISOC OUT
+PROCESSING ISOC OUT
+PROCESSING rtsServiceBulkOutBulkIn
+PROD_TEAC_US600 no digital
+ProductName
+ProductVersion
+PsCreateSystemThread
+PsTerminateSystemThread
+PtQuadPoleFilterData::createRIAA freq:%d chan:%d
+PtQuadPoleFilterFunction_SSE
+PtQuadPoleFilterFunction_UpSampling_SSE
+PUC2 - AP7000
+PUC2 - UC3
+q%9Y 
+rapid
+ReadMixerData uBufferLength:%d != sizeof(US3xx_UI):%d
+ReadRegistry Analog4 ChannelMapIn:%08X
+ReadRegistry Analog4 ChannelMapOut:%08X
+-readUC3UserFlash
+reg_query_binary %ws %d %p %d %p %p
+reg_query_binary dest:%p max:%d
+register SubDevice - MIDI
+register SubDevice - WDM
+registryReadBinary status:%08X
+relaxed
+relaxed normal
+requestIsocIn m_pcInPipeIsoc is NULL
+requestIsocInElektron InPipe or Handle is NULL
+requestIsocOut m_pcOutPipe is NULL
+requestIsocOut_CallbackBased m_pcOutPipe is NULL
+requestIsocOut_Pure m_pcOutPipe is NULL
+RESET REQUEST TO DEVICE
+RESET REQUEST TO DEVICE - from ASIO
+result..0x%08X
+retry configuration..0x%08X
+RIAA filter channel 1+2
+RIAA filter channel 3+4
+Root CA1
+ROUTING_IN_
+ROUTING_OUT_
+RoutingAccess
+RtlAnsiStringToUnicodeString
+RtlAppendUnicodeStringToString
+RtlAppendUnicodeToString
+RtlCompareUnicodeString
+RtlFreeUnicodeString
+RtlInitAnsiString
+RtlInitUnicodeString
+RtlIntegerToUnicodeString
+RtlQueryRegistryValues
+RtlUnicodeStringToAnsiString
+RtlWriteRegistryValue
+RtlxAnsiStringToUnicodeSize
+rtsIsocInputElektron ISOC mIsocInNumErrors:%d > MAX:%d
+rtsProcessBulkOutMIDI iUSBFramesAhead < 0 (%d)
+rtsProcessIsocIn iPossibleFrames is 0 while completed cur:%d start:%d proc:%d fullf:%d
+rtsServiceBulkOutBulkIn - pContext is NULL
+rtsServiceBulkOutBulkIn - self->rtsPrepareService(&pAudioSMIn) failed
+S/PDIF
+S/PDIF (RCA)
+Scanned Firmware Version is :%08X
+Schopfheim1
+Select configuration failed - ntStatus:%08X USBDStatus:%08X
+send effect changed...
+send effect off
+send effect on...
+set mIsoInDecoder for PROD_TEAC_UH7000
+set mIsoInDecoder for PROD_TEAC_US1200
+set mIsoInDecoder for PROD_TEAC_US366 
+Shutdown of shared memory - done
+Shutdown of shared memory -enter
+SMALLEST BUFFERSIZZE CHANGED TO :%d MS:%d
+Speaker
+SpecialBuild
+SQRVWH
+startDeviceAfterPowerDown
+StereoMix <-> Multitrack changed
+StringFileInfo
+strncpy
+switch to callback based processing
+Symantec Corporation100.
+Symantec Corporation1402
+'Symantec Time Stamping Services CA - G2
+'Symantec Time Stamping Services CA - G20
+SyncSelection
+t!HcT$(H
+T$ Hk
+T$|Hk
+T$8Hk
+T$lHk
+t%HcT$`HcL$(H
+t*HcL$$Hk
+t0ah[K
+t2HcD$ H
+tascam_open_cpl_countdown
+TerraTec
+Thawte Certification1
+Thawte Timestamping CA0
+Thawte1
+t'HcL$ Hi
+tIHcL$ H
+TimeStamp-2048-10
+TimeStamp-2048-20
+TLcD$dMi
+tLWPSQRH
+tmHcL$(Hk
+Translation
+tryFindInterfaces fr:%d in:%d/%d out:%d/%d
+tryFindInterfaces(%d) fr:%d in:%d/%d out:%d/%d
+tuLcD$
+tyHcL$0Hk
+u{HcL$ Hi
+u0HcL$lHk
+uEHcL$ H
+UH7000_BIN
+UH7K_WINDEX
+UH7K_WVALUE
+Unknown PNP Code
+Unknown vendor
+UNLOAD %s (USB) %s built:%s - %s
+Update digital locked at %d 
+updateAjInputSelector set bit for us1200/uh7000 stereo mode
+US1200/UH7000 stereo mix mode
+US1200_BIN
+US322_BIN
+us366 - unimplemented controller %02X %02X
+US366 SWITCHES
+US366_BIN
+US3XX_NEED_INIT
+USB Device
+USB: Configuration failed %08X
+USB: Hide MIDI Interface
+USB: start stream
+USB::buildDummyDescriptor %04X %04X  %04X %d
+USB::sendAndWait  - ..default
+USB::sendAndWait  - STATUS_ALERTED
+USB::sendAndWait  - STATUS_TIMEOUT UrbStatus:%08X IrpStatus:%08X
+USB::sendAndWait  - STATUS_USER_APC
+USB::sendAndWait second wait
+USB1Mode
+USBD.SYS
+USBD_CreateConfigurationRequestEx
+USBD_GetUSBDIVersion
+USBD_ParseConfigurationDescriptorEx
+v2.9.64
+v2.9.64.0
+V7 USB Audio Device
+VarFileInfo
+VENDOR_ELEKTRON -  use config #1
+Version
+Volume
+VOLUME_ADC
+VOLUME_MONITOR
+VOLUME_OUT_L
+VOLUME_OUT_R
+VolumeLIn
+VolumeLOut
+VolumeRIn
+VolumeROut
+VS_VERSION_INFO
+w_^ZY[
+WARNING registryGetLong failed %ws %ws default:%d
+WARNING registryReadBinary failed %ws %ws status:%08X
+WARNING registrySetLong failed %ws %ws value:%d error:%08X
+WARNING registryWriteBinary failed %ws %ws len:%d error:%08X
+Western Cape1
+will retry...
+WORK_HANDLE_STREAM_BROKEN - device seems to be gone
+WORK_RESTART_STREAM
+WORK_RESUME_MME
+WORK_RESUME_MME attachWDM returned:%d at:%d Hz
+WORK_STOP_STREAM_AFTER_HW_ERROR
+WORK_TIMED_CALL_ATTACH_MME 
+Write Analog4 ChannelMapIn:%08X length:%d bytes
+Write Analog4 ChannelMapOut:%08X length:%d bytes
+WRITE INPUT SELECT status:%08X data:%02X
+WriteMixerData uBufferLength:%d != sizeof(US3xx_UI):%d
+-writeUC3UserFlash
+wValue :%04X wIndex:%04X
+x#u/H
+XHcL$lHk
+XLcD$dMi
+y3+.{
+Z<ZDR
+z0x0@
+Z0X03
+zcK+M
+Zero Input On Digital
+Zero Input On Digital PROD_PLOYTEC_ALLEN_HEATH_XONE_2D
+Zero Input On Digital PROD_PLOYTEC_ALLEN_HEATH_XONE_4D
+Zero Input On Digital PROD_PLOYTEC_ALLEN_HEATH_XONE_DX
+Zero Input On Digital US1641/US1800/US2000
+ZwClose
+ZwDeleteKey
+ZwEnumerateKey
+ZwOpenKey
+ZY[X_

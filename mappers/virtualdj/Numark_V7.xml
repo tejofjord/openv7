@@ -1,43 +1,118 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  Numark V7 — VirtualDJ device definition (STARTER)  ·  via OpenV7
+  Numark V7 — VirtualDJ device definition  ·  via OpenV7
 
   Use with the OpenV7 userspace bridge running (the V7 appears as the MIDI
-  device "Numark V7"). This file maps the controls verified from captured USB
-  traffic and leaves the rest as TODO placeholders to confirm with MIDI-learn.
+  device "Numark V7").
 
-  The button/pad message numbers below are NOT yet confirmed on hardware —
-  run `openv7 -v`, press each control, and fill in the real values, then send
-  a PR. See ../../docs/PROTOCOL.md. If the schema needs tweaking for your
-  VirtualDJ version, prefer MIDI-learn (see README.md) and update this file.
+  Addresses come from ../../docs/CONTROL-MAP.md. Two confidence levels apply:
+
+    VERIFIED  measured on hardware by OpenV7 (the platter and the whole motor
+              command set).
+    MAPPED    cross-referenced from the community Mixxx mapping and not yet
+              confirmed on a physical unit. The addresses are corroborated
+              wherever they overlap with the verified set, but the deck
+              assignment in particular deserves suspicion.
+
+  If a control does not respond, prefer MIDI-learn (see README.md) and please
+  contribute the corrected value back — see docs/CONTROL-MAP.md for how to run
+  the verification tools.
 -->
 <device name="Numark V7" author="OpenV7" type="MIDI" decks="1"
         description="Numark V7 motorized controller via the OpenV7 userspace bridge">
 
-  <!-- ================= VERIFIED (captured on hardware) ================= -->
+  <!-- ==================== VERIFIED ON HARDWARE ==================== -->
 
-  <!-- Motorized platter: 7-bit wrapping position counter, 3600 ticks/rev.
-       Deck A = CC 0x00, deck B = CC 0x02, paired with a 0xE0 pitch-bend
-       "timestamp" for velocity (clock 2,822,400 Hz). -->
-  <map value="0xB0 0x00" name="jog"  />
-  <map value="0xE0 0x00" name="jog_touch" />   <!-- TODO: refine pitch-bend timestamp handling -->
+  <!-- Motorized platter: 7-bit wrapping position counter, 3600 counts/rev,
+       paired 1:1 with a 0xE0 pitch-bend timestamp (clock 2,822,400 Hz).
+       A stationary platter sends nothing. -->
+  <map value="0xB0 0x00" name="jog"       deck="1" />
+  <map value="0xB0 0x02" name="jog"       deck="2" />
 
-  <!-- ============= TODO — confirm with `openv7 -v` + MIDI-learn ============= -->
-  <!-- Replace 0xNN with the real note/CC numbers each control emits. -->
-  <!-- <map value="0x90 0xNN" name="play"          /> -->
-  <!-- <map value="0x90 0xNN" name="cue"           /> -->
-  <!-- <map value="0x90 0xNN" name="sync"          /> -->
-  <!-- <map value="0x90 0xNN" name="deck_select"   /> -->
-  <!-- <map value="0xB0 0xNN" name="pitch"         /> --><!-- 100 mm pitch fader -->
-  <!-- <map value="0xB0 0xNN" name="strip_search"  /> --><!-- needle strip -->
-  <!-- <map value="0x90 0xNN" name="pad_1"         /> --><!-- hot cues 1-5 -->
-  <!-- <map value="0xB0 0xNN" name="browser_scroll"/> --><!-- library knob -->
+  <!-- ======================= TRANSPORT ======================= -->
+  <map value="0x90 0x11" name="play"      deck="1" />
+  <map value="0x90 0x32" name="play"      deck="2" />
+  <map value="0x90 0x10" name="cue"       deck="1" />
+  <map value="0x90 0x31" name="cue"       deck="2" />
+  <map value="0x90 0x0F" name="sync"      deck="1" />
+  <map value="0x90 0x30" name="sync"      deck="2" />
+  <map value="0x90 0x12" name="shift"     deck="1" />
+  <map value="0x90 0x33" name="shift"     deck="2" />
 
-  <!-- ================= OUTPUT (host -> device) ================= -->
-  <!-- Motor + LEDs are driven by sending MIDI to the "Numark V7" destination.
-       Motor command set (deck A, status 0xB0), verified spins the platter:
-         0x43 = soft start   0x44 = brake    0x41 = instant start
-         0x45 = RPM (00=33, 01=45)           0x46 = direction (00 fwd / 01 rev)
-       See docs/PROTOCOL.md for the full set. Output mappings are next. -->
+  <!-- ======================== HOT CUES ======================== -->
+  <map value="0x90 0x13" name="hot_cue 1" deck="1" />
+  <map value="0x90 0x14" name="hot_cue 2" deck="1" />
+  <map value="0x90 0x15" name="hot_cue 3" deck="1" />
+  <map value="0x90 0x16" name="hot_cue 4" deck="1" />
+  <map value="0x90 0x17" name="hot_cue 5" deck="1" />
+  <map value="0x90 0x34" name="hot_cue 1" deck="2" />
+  <map value="0x90 0x35" name="hot_cue 2" deck="2" />
+  <map value="0x90 0x36" name="hot_cue 3" deck="2" />
+  <map value="0x90 0x37" name="hot_cue 4" deck="2" />
+  <map value="0x90 0x38" name="hot_cue 5" deck="2" />
+
+  <!-- ========================= PITCH ========================= -->
+  <!-- 100 mm pitch fader, 14-bit: coarse CC n, fine CC n+32. -->
+  <map value="0xB0 0x04" name="pitch"          deck="1" />
+  <map value="0xB0 0x05" name="pitch"          deck="2" />
+  <map value="0x90 0x18" name="pitch_bend -"   deck="1" />
+  <map value="0x90 0x19" name="pitch_bend +"   deck="1" />
+  <map value="0x90 0x39" name="pitch_bend -"   deck="2" />
+  <map value="0x90 0x3A" name="pitch_bend +"   deck="2" />
+  <map value="0x90 0x1A" name="pitch_range"    deck="1" />
+  <map value="0x90 0x3B" name="pitch_range"    deck="2" />
+  <map value="0x90 0x1B" name="key_lock"       deck="1" />
+  <map value="0x90 0x3C" name="key_lock"       deck="2" />
+
+  <!-- ========================= LOOPS ========================= -->
+  <map value="0x90 0x28" name="loop_in"        deck="1" />
+  <map value="0x90 0x29" name="loop_out"       deck="1" />
+  <map value="0x90 0x24" name="reloop"         deck="1" />
+  <map value="0x90 0x22" name="loop_half"      deck="1" />
+  <map value="0x90 0x23" name="loop_double"    deck="1" />
+  <map value="0x90 0x49" name="loop_in"        deck="2" />
+  <map value="0x90 0x4A" name="loop_out"       deck="2" />
+  <map value="0x90 0x45" name="reloop"         deck="2" />
+  <map value="0x90 0x43" name="loop_half"      deck="2" />
+  <map value="0x90 0x44" name="loop_double"    deck="2" />
+
+  <!-- ===================== STRIP / BROWSE ===================== -->
+  <map value="0xB0 0x45" name="strip_search"   deck="1" />
+  <map value="0xB0 0x4D" name="strip_search"   deck="2" />
+  <map value="0xB0 0x44" name="browser_scroll" />
+  <map value="0x90 0x0C" name="load"           deck="1" />
+  <map value="0x90 0x0E" name="load"           deck="2" />
+  <map value="0x90 0x06" name="browser_up"     />
+  <map value="0x90 0x07" name="browser_down"   />
+
+  <!-- =========================== FX =========================== -->
+  <map value="0x90 0x52" name="effect_active 1" deck="1" />
+  <map value="0x90 0x59" name="effect_active 1" deck="2" />
+  <map value="0xB0 0x57" name="effect_slider 1" deck="1" />
+  <map value="0xB0 0x59" name="effect_slider 1" deck="2" />
+  <map value="0x90 0x1E" name="tap"             deck="1" />
+  <map value="0x90 0x3F" name="tap"             deck="2" />
+
+  <!-- ================= OUTPUT (host -> device) =================
+       All output is CC on status 0xB0 - note-on does NOT drive the LEDs.
+       LED block: deck B = deck A + 0x16.   Motor block: deck B = A + 0x0A.
+
+       Motor command set (VERIFIED on hardware, deck A):
+         0x41 instant start   0x42 instant stop
+         0x43 soft start      0x44 brake
+         0x45 RPM select      00 = 33 1/3, 01 = 45
+         0x46 direction       01 = reverse - MUST be latched while stopped:
+                              send 0x42 (stop), then 0x46 01, then 0x43
+         0x47 start ramp time 0x48 brake ramp time   (higher = slower)
+         0x49 + 0x69          pitch trim, signed 14-bit two's complement,
+                              speed = nominal * (1 + s / 10000)
+
+       See ../../docs/CONTROL-MAP.md for the full LED address table. -->
+  <map value="0xB0 0x09" name="led play"     deck="1" />
+  <map value="0xB0 0x08" name="led cue"      deck="1" />
+  <map value="0xB0 0x07" name="led sync"     deck="1" />
+  <map value="0xB0 0x1F" name="led play"     deck="2" />
+  <map value="0xB0 0x1E" name="led cue"      deck="2" />
+  <map value="0xB0 0x1D" name="led sync"     deck="2" />
 
 </device>

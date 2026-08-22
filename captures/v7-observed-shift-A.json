@@ -1,0 +1,22 @@
+﻿{
+    "label":  "shift-A",
+    "seconds":  100,
+    "totalMessages":  6,
+    "confirmed":  [
+                      {
+                          "Key":  "90:12",
+                          "Desc":  "NoteOn   0x12",
+                          "Status":  144,
+                          "D1":  18,
+                          "Count":  6,
+                          "Min":  0,
+                          "Max":  127,
+                          "Distinct":  2,
+                          "Expected":  "SHIFT A",
+                          "Sample":  "90 12 7F|90 12 00|90 12 7F|90 12 00|90 12 7F|90 12 00"
+                      }
+                  ],
+    "undocumented":  [
+
+                     ]
+}

@@ -16,12 +16,19 @@ The most reliable path while the full control map is still being verified:
 Tip: run `./openv7 --learn`, touch every control once, and press Ctrl-C for a
 catalog of each control's MIDI message — the fastest way to confirm what to map.
 
-## Option B — starter definition file
+## Option B — definition file
 
-[`Numark_V7.xml`](Numark_V7.xml) is a **starter** definition. It maps the parts
-verified on hardware (the motorized platters) and leaves the rest as clearly
-marked `TODO` entries to fill in with MIDI-learn or once the full map is
-confirmed (see [../../docs/PROTOCOL.md](../../docs/PROTOCOL.md)).
+[`Numark_V7.xml`](Numark_V7.xml) now carries the full control map rather than
+`TODO` placeholders. Two confidence levels apply, and the file marks which is
+which:
+
+- the platter and the entire motor command set are **measured on hardware**;
+- the buttons, pads, faders and LEDs are **cross-referenced** from the
+  community Mixxx mapping and corroborated wherever they overlap with the
+  measured set, but are not yet confirmed on a physical unit.
+
+See [../../docs/CONTROL-MAP.md](../../docs/CONTROL-MAP.md) for the full address
+table and how to verify the unconfirmed rows.
 
 Install it by copying to VirtualDJ's device folder:
 
@@ -31,10 +38,11 @@ cp "Numark_V7.xml" ~/Documents/VirtualDJ/Devices/
 
 Then restart VirtualDJ and select **Numark V7** under Controllers.
 
-> ⚠️ This file is a work in progress. The jog/platter and motor lines are based
-> on captured traffic; the button/pad note numbers are placeholders. Please
-> contribute confirmed values back — run `openv7 --learn`, note each control's
-> message, and open a PR updating both this file and `docs/PROTOCOL.md`.
+> ⚠️ The button/pad/LED rows are cross-referenced, not yet confirmed on a
+> physical unit. If a control misbehaves, please contribute the corrected value
+> back — run `openv7 --learn` (or `tools/win/midi-learn.ps1` on Windows), note
+> each control's message, and open a PR updating this file and
+> `docs/CONTROL-MAP.md`.
 
 ## Motor / LED output
 

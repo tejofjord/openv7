@@ -1,0 +1,94 @@
+﻿{
+    "label":  "shift-and-library",
+    "seconds":  400,
+    "totalMessages":  20,
+    "confirmed":  [
+                      {
+                          "Key":  "90:33",
+                          "Desc":  "NoteOn   0x33",
+                          "Status":  144,
+                          "D1":  51,
+                          "Count":  4,
+                          "Min":  0,
+                          "Max":  127,
+                          "Distinct":  2,
+                          "Expected":  "SHIFT B",
+                          "Sample":  "90 33 7F|90 33 00|90 33 7F|90 33 00"
+                      },
+                      {
+                          "Key":  "90:32",
+                          "Desc":  "NoteOn   0x32",
+                          "Status":  144,
+                          "D1":  50,
+                          "Count":  2,
+                          "Min":  0,
+                          "Max":  127,
+                          "Distinct":  2,
+                          "Expected":  "PLAY B",
+                          "Sample":  "90 32 7F|90 32 00"
+                      },
+                      {
+                          "Key":  "90:31",
+                          "Desc":  "NoteOn   0x31",
+                          "Status":  144,
+                          "D1":  49,
+                          "Count":  2,
+                          "Min":  0,
+                          "Max":  127,
+                          "Distinct":  2,
+                          "Expected":  "CUE B",
+                          "Sample":  "90 31 7F|90 31 00"
+                      },
+                      {
+                          "Key":  "90:34",
+                          "Desc":  "NoteOn   0x34",
+                          "Status":  144,
+                          "D1":  52,
+                          "Count":  2,
+                          "Min":  0,
+                          "Max":  127,
+                          "Distinct":  2,
+                          "Expected":  "HOT CUE 1 B",
+                          "Sample":  "90 34 7F|90 34 00"
+                      },
+                      {
+                          "Key":  "90:35",
+                          "Desc":  "NoteOn   0x35",
+                          "Status":  144,
+                          "D1":  53,
+                          "Count":  2,
+                          "Min":  0,
+                          "Max":  127,
+                          "Distinct":  2,
+                          "Expected":  "HOT CUE 2 B",
+                          "Sample":  "90 35 7F|90 35 00"
+                      },
+                      {
+                          "Key":  "90:49",
+                          "Desc":  "NoteOn   0x49",
+                          "Status":  144,
+                          "D1":  73,
+                          "Count":  2,
+                          "Min":  0,
+                          "Max":  127,
+                          "Distinct":  2,
+                          "Expected":  "LOOP IN B",
+                          "Sample":  "90 49 7F|90 49 00"
+                      },
+                      {
+                          "Key":  "90:59",
+                          "Desc":  "NoteOn   0x59",
+                          "Status":  144,
+                          "D1":  89,
+                          "Count":  2,
+                          "Min":  0,
+                          "Max":  127,
+                          "Distinct":  2,
+                          "Expected":  "FX ON B",
+                          "Sample":  "90 59 7F|90 59 00"
+                      }
+                  ],
+    "undocumented":  [
+
+                     ]
+}

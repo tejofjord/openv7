@@ -1,0 +1,117 @@
+﻿{
+    "label":  "final-two",
+    "seconds":  300,
+    "totalMessages":  14,
+    "confirmed":  [
+                      {
+                          "Key":  "90:5C",
+                          "Desc":  "NoteOn   0x5C",
+                          "Status":  144,
+                          "D1":  92,
+                          "Count":  1,
+                          "Min":  127,
+                          "Max":  127,
+                          "Distinct":  1,
+                          "Expected":  "DECK SELECT L",
+                          "Sample":  "90 5C 7F"
+                      },
+                      {
+                          "Key":  "90:3E",
+                          "Desc":  "NoteOn   0x3E",
+                          "Status":  144,
+                          "D1":  62,
+                          "Count":  1,
+                          "Min":  0,
+                          "Max":  0,
+                          "Distinct":  1,
+                          "Expected":  "REVERSE/CENSOR B (2)",
+                          "Sample":  "90 3E 00"
+                      },
+                      {
+                          "Key":  "B0:4D",
+                          "Desc":  "CC       0x4D",
+                          "Status":  176,
+                          "D1":  77,
+                          "Count":  1,
+                          "Min":  0,
+                          "Max":  0,
+                          "Distinct":  1,
+                          "Expected":  "strip search B",
+                          "Sample":  "B0 4D 00"
+                      },
+                      {
+                          "Key":  "B0:4F",
+                          "Desc":  "CC       0x4F",
+                          "Status":  176,
+                          "D1":  79,
+                          "Count":  1,
+                          "Min":  42,
+                          "Max":  42,
+                          "Distinct":  1,
+                          "Expected":  "motor STOP TIME knob B",
+                          "Sample":  "B0 4F 2A"
+                      },
+                      {
+                          "Key":  "B0:59",
+                          "Desc":  "CC       0x59",
+                          "Status":  176,
+                          "D1":  89,
+                          "Count":  2,
+                          "Min":  61,
+                          "Max":  61,
+                          "Distinct":  1,
+                          "Expected":  "FX slider B (coarse)",
+                          "Sample":  "B0 59 3D|B0 59 3D"
+                      },
+                      {
+                          "Key":  "B0:79",
+                          "Desc":  "CC       0x79",
+                          "Status":  176,
+                          "D1":  121,
+                          "Count":  2,
+                          "Min":  61,
+                          "Max":  62,
+                          "Distinct":  2,
+                          "Expected":  "FX slider B (fine)",
+                          "Sample":  "B0 79 3E|B0 79 3D"
+                      },
+                      {
+                          "Key":  "B0:4E",
+                          "Desc":  "CC       0x4E",
+                          "Status":  176,
+                          "D1":  78,
+                          "Count":  1,
+                          "Min":  0,
+                          "Max":  0,
+                          "Distinct":  1,
+                          "Expected":  "motor START TIME knob B",
+                          "Sample":  "B0 4E 00"
+                      },
+                      {
+                          "Key":  "90:42",
+                          "Desc":  "NoteOn   0x42",
+                          "Status":  144,
+                          "D1":  66,
+                          "Count":  2,
+                          "Min":  0,
+                          "Max":  127,
+                          "Distinct":  2,
+                          "Expected":  "MOTOR ON/OFF B",
+                          "Sample":  "90 42 7F|90 42 00"
+                      }
+                  ],
+    "undocumented":  [
+                         {
+                             "Key":  "B0:7D",
+                             "Desc":  "CC       0x7D",
+                             "Status":  176,
+                             "D1":  125,
+                             "Count":  1,
+                             "Min":  1,
+                             "Max":  1,
+                             "Distinct":  1,
+                             "Expected":  null,
+                             "Sample":  "B0 7D 01"
+                         }
+                     ]
+}

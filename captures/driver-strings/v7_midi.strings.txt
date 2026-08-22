@@ -1,0 +1,168 @@
+﻿!This program cannot be run in DOS mode.
+"http://crl.globalsign.net/root.crl0
+%HcT$tHcL$pH
+&,LUp
+&0$0"
+&https://www.globalsign.com/repository/0
+&https://www.globalsign.com/repository/03
+(http://ocsp2.globalsign.com/gscodesigng20
+*** DriverEntry (MIDI) %s built:%s - %s
+*** DriverUnload(MIDI) %s built:%s - %s
+,0*0(
+.http://crl.thawte.com/ThawteTimestampingCA.crl0
+.pdata
+.rsrc
+.text
+/Pz0G
+/V.?.
+?V,)b
+@0>0<
+\vnO^
+]jxdE
+|CHcD$tH
+}%HcL$,Hi
+}?HcL$ Hi
+}5HcL$$H
++http://ts-aia.ws.symantec.com/tss-ca-g2.cer0<
++http://ts-crl.ws.symantec.com/tss-ca-g2.crl0(
++Symantec Time Stamping Services Signer - G40
+</assembly>PAPADDINGXXPADDINGPADDINGXXPADDINGPADDINGXXPADDINGPADDINGXXPADDINGPADDINGXXPADDINGPADDINGXXPADDINGPADDINGXXPADDINGPADDINGXXPADDINGPADDINGXXPADDINGPADDINGXXPADDINGPADDINGXXPADDINGPADDINGXXPADDINGPADDINGXXPADDINGPADDINGXXPADDINGPADDINGXXPADDINGPADDINGXXPADDINGPADDINGXXPADDINGPADDINGXXPADDINGPADDINGXXPADDINGPADDINGXXPADDINGPADDINGXXPADDINGPADDINGXXPADDINGPADDINGXXPADDINGPADDINGXXPADDING
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+>"hcS
+040904b0
+0g0Q1
+0r0^1
+110413100000Z
+121018000000Z
+121221000000Z
+131204124756Z
+140523151517Z0#
+16:19:18
+170109173358Z0
+190413100000Z0Q1
+201229235959Z0b1
+201230235959Z0^1
+20402
+4http://secure.globalsign.com/cacert/gscodesigng2.crt04
+50301
+70503
+80604
+9D$8}R
+B.reloc
+Baden-Wuerttemberg1
+CFo~(DP
+Comments
+CompanyName
+Copyright (C) Ploytec GmbH 2000-2013
+D$ E3
+D$(H9
+D$,9D$(ti
+D$@9D$
+D$09D$`
+D$HfA
+D$p9D$ t
+DbgPrint
+DIQ%z
+DMusStream::sendEvent(%d bytes) - no free event
+Durbanville1
+E0C0A
+ExAllocatePool
+ExFreePoolWithTag
+FileDescription
+FileVersion
+g0e0*
+GlobalSign CodeSigning CA - G2
+GlobalSign CodeSigning CA - G20
+GlobalSign nv-sa1
+GlobalSign nv-sa1'0%
+GlobalSign Root CA0
+H.data
+h.rdata
+HcD$$D
+HcD$8H
+HcD$DH
+HcD$HH
+HcD$LH
+HcL$ H
+HcL$ Hi
+HcL$$Hi
+HcL$,H
+HcL$tH
+HcL$XH
+HINIT
+-http://crl.globalsign.com/gs/gscodesigng2.crl0
+http://ocsp.thawte.com0
+http://ts-ocsp.ws.symantec.com07
+info@ploytec.com0
+InQueue overrun
+InQueue RealTime overrun
+InternalName
+IoAllocateIrp
+IofCallDriver
+IoFreeIrp
+KeCancelTimer
+KeClearEvent
+KeDelayExecutionThread
+KeInitializeDpc
+KeInitializeEvent
+KeInitializeTimer
+KeSetTimer
+KeWaitForEvent - invalid IRQ Level %d / timeout %d /ID %d
+KeWaitForSingleObject
+L$ E3
+L$ fD
+L$@E3
+L$`E3
+L$0E3
+L$8E3
+LegalCopyright
+LegalTrademarks
+May 23 2014
+mpAllocatorMXF->GetMessage returned %08X
+mpSinkMXF->PutMessage returned %08X
+nmrkusbm.sys
+NTOSKRNL.exe
+Numark
+Numark WDM MIDI Driver
+NUMARK_V7_MIDI01
+ObfDereferenceObject
+ObfReferenceObject
+OriginalFilename
+PcAddAdapterDevice
+PcInitializeAdapterDriver
+PcNewMiniport
+PcNewPort
+PcNewServiceGroup
+PcRegisterSubdevice
+Ploytec GmbH1
+portcls.sys
+PrivateBuild
+ProductName
+ProductVersion
+q%9Y 
+Root CA1
+Schopfheim1
+SpecialBuild
+StringFileInfo
+Symantec Corporation100.
+Symantec Corporation1402
+'Symantec Time Stamping Services CA - G2
+'Symantec Time Stamping Services CA - G20
+t9HcL$$Hi
+Thawte Certification1
+Thawte Timestamping CA0
+Thawte1
+TimeStamp-2048-10
+TimeStamp-2048-20
+Translation
+USBMidiAdapter::callUSBDriver this is NULL
+USBMidiAdapterBase::term :%p
+v2.9.64
+v2.9.64.0
+VarFileInfo
+VS_VERSION_INFO
+Western Cape1
+y3+.{
+z0x0@
+Z0X03
+ZQJVI
