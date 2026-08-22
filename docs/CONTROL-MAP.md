@@ -134,7 +134,20 @@ one MIDI message per 42-byte `0xFD`-padded frame.
 
 ### LEDs
 
-Deck B = deck A + `0x16`. Values are `0x00` = off, `0x01` = on unless noted.
+Deck B = deck A + `0x16`.
+
+**✅ LEDs are binary — there is no brightness control.** Tested by holding one
+lamp at `0x01`, `0x40` and `0x7F` for five seconds each, three times over: no
+visible difference at any value. A blink test at `0x7F`/`0x00` on the same lamp
+confirmed it was responding, so the null result is real rather than an LED that
+never lit.
+
+So `0x00` = off and **any non-zero value = fully on**. Do not expect dimming,
+and do not waste time hunting for a velocity curve. Multi-state feedback has to
+be done by blinking in software.
+
+*(The `0x34`/`0x35`/`0x36` group is the exception — it takes ordinal values
+`0x00`–`0x0C` and is a display or position indicator rather than a lamp.)*
 
 | CC A | CC B | Lights | Confidence |
 |---|---|---|---|
