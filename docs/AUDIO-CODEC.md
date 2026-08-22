@@ -61,12 +61,46 @@ So the V7 is a **4-channel 24-bit output** device, not the 8-channel/48-byte
 Ploytec junction layout Ozzy documents for the Xone family. The Xone frame
 sizes do not apply to the V7's output. The *input* frame size (64 B) does.
 
-### What the encoding still is not known to be
+## ✅ The output encoding — decoded, and it is NOT bit-interleaved
 
-Silence captured as all-zero bytes, which is consistent with both plain
-`S24_3LE` packing *and* bit-interleaving (scattering zeros still yields zeros).
-Distinguishing them needs a capture **with real audio playing** — still the open
-item, and still scenario 4 of the capture script.
+Captured with a 441 Hz sine at amplitude 0.5 rendered straight into the V7's
+own endpoint via WASAPI (`tools/win/capture-audio.ps1`), so the payload is a
+known signal. The iso-OUT bytes come out as:
+
+```
+1139cc 1139cc 000000 000000 | 88f6c9 88f6c9 000000 000000 | 98eac7 98eac7 000000 000000
+  ch1    ch2    ch3    ch4  |   ch1    ch2    ch3    ch4  |   ch1    ch2    ch3    ch4
+```
+
+**Plain interleaved `S24_3LE`: 4 channels × 24-bit signed little-endian,
+12 bytes per audio frame.** Nothing is scattered, nothing is bit-sliced.
+
+Decoding the successive ch1 values as signed 24-bit LE traces a clean sine
+trough and bottoms out at `00 00 c0` = `0xC00000` = **−4,194,304**, which is
+exactly **−0.5 × 2²³** — precisely the amplitude requested. Values then rise
+back symmetrically. The waveform is reproduced exactly, so there is no
+transformation on the wire at all.
+
+Channel assignment: the tone was played to the `Speakers (Numark V7 Audio)`
+endpoint and landed on **channels 1 and 2**, with **3 and 4** silent — deck A
+and deck B stereo pairs respectively.
+
+> **This overturns the project's central audio assumption.** ROADMAP.md called
+> decoding the Ploytec bit-sliced format "the main remaining work" for native
+> audio. For the V7's *output* there is no such format to decode — writing
+> ordinary interleaved 24-bit PCM into the iso packets is sufficient. The
+> bit-interleaved codec Ozzy documents belongs to the Xone family's bulk PCM
+> path, not to the V7's isochronous output.
+
+### The input side is still unknown
+
+Bulk IN `0x86` carried **all zeros** during both the tone and the silence,
+because nothing was connected to the V7's line input. Its *rate* is pinned
+(64 B/frame × 44.1 kHz) and that frame size matches Ozzy's
+`PLOYTEC_IN_FRAME_SIZE` exactly, which is suggestive of the 64-byte
+bit-per-byte input layout — but with no signal present this capture cannot
+confirm it. Determining the input encoding needs a capture with a live source
+plugged into the V7's inputs.
 
 ## The codec
 
@@ -158,9 +192,20 @@ Input and output resolutions are independent.
 
 ## Implementation order
 
-1. Confirm the V7's actual packet geometry from a capture — the 156-byte
-   iso-OUT packet does not match the Xone layout, so this must come first.
-2. Port the bit-scatter/gather. It is pure computation with no I/O; Ozzy's
-   `ploytec_codec.c` is MIT-licensed and can be adapted with attribution.
-3. Wire the MIDI slots into the same packet path rather than treating control
-   and audio as separate streams.
+Much shorter than previously thought, now that the output format is known:
+
+1. **Fix the iso pacing first** — OpenV7 sends fixed 156-byte packets where the
+   vendor driver alternates 72/60. That is a 2.36× overfeed and is the prime
+   suspect for the long-idle stall (see
+   [PROTOCOL.md](PROTOCOL.md#️-implication-for-openv7s-long-idle-stall)).
+   Getting this right is worth doing on its own, before any audio work.
+2. **Write PCM into the iso packets** as plain interleaved 24-bit LE,
+   4 channels, 12 bytes per frame, 6 and 5 frames in alternating packets. No
+   codec required.
+3. Expose it as a CoreAudio device.
+4. Input (`0x86`) only once there is a reason to — its encoding is still
+   unconfirmed and the V7 is primarily an output device.
+
+The MIDI-slot framing described above belongs to the Ploytec **bulk** PCM path.
+The V7 sends control on its own bulk endpoints, separate from the isochronous
+audio, so that interleaving does not apply here.

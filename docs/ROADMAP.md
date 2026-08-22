@@ -21,12 +21,17 @@
 - [ ] Homebrew formula
 
 ## v2 — native audio
-- [x] Document the Ploytec bit-interleaved codec and packet framing —
-      [AUDIO-CODEC.md](AUDIO-CODEC.md)
-- [ ] Measure the V7's actual iso-OUT packet geometry (its 156-byte packet does
-      not match the Xone 48-byte frame — needs a capture)
-- [ ] Implement encode/decode (Ozzy's `ploytec_codec.c` is MIT; adapt with
-      attribution)
+- [x] **Output format decoded — there is no codec to write.** Captured with a
+      known sine: the V7's iso-OUT is plain interleaved **24-bit signed LE,
+      4 channels, 12 bytes per frame**, not bit-sliced. See
+      [AUDIO-CODEC.md](AUDIO-CODEC.md).
+- [x] Packet geometry measured: 40 iso packets/URB, sizes alternating
+      **72/60 bytes** (6 and 5 audio frames), ~529 kB/s.
+- [ ] **Fix the iso pacing** — OpenV7 sends fixed 156-byte packets, a 2.36×
+      overfeed, and the prime suspect for the long-idle stall. Do this first.
+- [ ] Feed real PCM into the iso packets (no encoder needed)
+- [ ] Input (`0x86`) encoding — rate known (64 B/frame), format unconfirmed;
+      needs a capture with a live source in the V7's inputs
 - [ ] Expose a CoreAudio virtual device (AudioServerPlugin) so the V7's own
       outputs are selectable in any app
 - [ ] Sync the audio device clock to the iso stream

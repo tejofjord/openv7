@@ -30,11 +30,25 @@ if (-not (New-Object Security.Principal.WindowsPrincipal($id)).IsInRole(
     exit 1
 }
 
+# --extcap-interfaces returns nothing on some machines even when the control
+# devices plainly exist, so fall back to probing the device paths: anything
+# that does not fail with "could not find file" is present, including the
+# access-denied and busy cases.
 function Get-Ifaces {
-    $out = & $UsbPcapCmd --extcap-interfaces 2>$null
     $found = @()
-    foreach ($line in $out) {
+    foreach ($line in (& $UsbPcapCmd --extcap-interfaces 2>$null)) {
         if ($line -match 'value=(\\\\\.\\USBPcap\d+)') { $found += $Matches[1] }
+    }
+    if ($found.Count -gt 0) { return $found }
+
+    foreach ($n in 1..8) {
+        $path = "\\.\USBPcap$n"
+        try {
+            $h = [System.IO.File]::Open($path, 'Open', 'Read', 'ReadWrite')
+            $h.Close(); $found += $path
+        } catch {
+            if ($_.Exception.Message -notmatch 'Could not find file') { $found += $path }
+        }
     }
     return $found
 }
