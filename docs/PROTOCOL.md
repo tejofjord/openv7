@@ -83,6 +83,43 @@ sends nothing on the control-IN endpoint until this clock is running.**
 - ✅ **Output**: send one MIDI message per 42-byte frame, `0xFD`-padded, on bulk
   `0x04`.
 
+## Device identity — SysEx inquiry ✅
+
+The V7 answers the **MIDI Universal Non-Realtime Device Inquiry** with a
+vendor-format reply. This is the only way to get a unique identifier out of the
+unit: its USB descriptor reports `NO_SERIAL_NUMBER`.
+
+```
+host   F0 7E <dev> 06 01 F7            # <dev> = 00, 01 or 7F, all work
+device F0 00 01 3F 7F 75 07 00 02 04 01 00 02 08
+       30 4E 31 31 30 30 31 31 38 38 31 30 33 34 32 38 F7
+```
+
+| Offset | Bytes | Meaning |
+|---|---|---|
+| 0 | `F0` | SysEx start |
+| 1–3 | `00 01 3F` | 3-byte extended manufacturer ID |
+| 4 | `7F` | device ID (echoed as broadcast regardless of what was sent) |
+| 5 | `75` | product — matches USB PID `0x0075` |
+| 6–13 | `07 00 02 04 01 00 02 08` | header / version field, not yet decoded |
+| 14–29 | ASCII | **serial number**, here `0N11001188103428` |
+| 30 | `F7` | SysEx end |
+
+The reply is byte-identical for `<dev>` = `00`, `01` and `7F`. Note the reply is
+**not** in the standard `F0 7E .. 06 02 ..` identity-reply format — it is a
+vendor frame, so a generic MIDI identity parser will not recognise it.
+
+> ⚠️ **Do not fuzz the vendor SysEx space.** `v7_usb.sys` exports
+> `writeUC3UserFlash` and has a firmware-updater path (see
+> [VENDOR-DRIVER.md](VENDOR-DRIVER.md)), so blind-sweeping commands under
+> manufacturer `00 01 3F` risks writing MCU flash or entering a bootloader on
+> hardware that is discontinued and unreplaceable. Map this space from a
+> **capture of the vendor driver** doing it, not by guessing.
+
+A CC and note-on sweep of the entire `0x00`–`0x7F` range produced **no** device
+replies, so there is no simple CC-based query channel — the inquiry above is
+the only request/response path found so far.
+
 ## Motor command set (host → device, on bulk `0x04`)
 
 Status byte `0xB0`, deck A shown. **All ✅ — measured on hardware** by using the

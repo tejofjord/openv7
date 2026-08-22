@@ -46,6 +46,9 @@ public static class MidiMon
 
     [DllImport("winmm.dll")] static extern uint midiOutOpen(out IntPtr h, uint id, IntPtr cb, IntPtr inst, uint flags);
     [DllImport("winmm.dll")] static extern uint midiOutShortMsg(IntPtr h, uint msg);
+    [DllImport("winmm.dll")] static extern uint midiOutLongMsg(IntPtr h, IntPtr hdr, uint size);
+    [DllImport("winmm.dll")] static extern uint midiOutPrepareHeader(IntPtr h, IntPtr hdr, uint size);
+    [DllImport("winmm.dll")] static extern uint midiOutUnprepareHeader(IntPtr h, IntPtr hdr, uint size);
     [DllImport("winmm.dll")] static extern uint midiOutReset(IntPtr h);
     [DllImport("winmm.dll")] static extern uint midiOutClose(IntPtr h);
 
@@ -239,6 +242,46 @@ public static class MidiMon
     {
         if (_hOut == IntPtr.Zero) return 0xFFFFFFFF;
         return midiOutShortMsg(_hOut, (uint)(status | (d1 << 8) | (d2 << 16)));
+    }
+
+    // Send a SysEx (or any long) message. `hex` is a plain hex string and must
+    // include the leading F0 and trailing F7.
+    public static uint SendSysex(string hex)
+    {
+        if (_hOut == IntPtr.Zero) return 0xFFFFFFFF;
+        int n = hex.Length / 2;
+        byte[] data = new byte[n];
+        for (int i = 0; i < n; i++)
+            data[i] = Convert.ToByte(hex.Substring(i * 2, 2), 16);
+
+        IntPtr buf = Marshal.AllocHGlobal(n);
+        Marshal.Copy(data, 0, buf, n);
+
+        MIDIHDR hdr = new MIDIHDR();
+        hdr.lpData = buf;
+        hdr.dwBufferLength = (uint)n;
+        hdr.dwBytesRecorded = (uint)n;
+        hdr.dwReserved = new IntPtr[8];
+        IntPtr pHdr = Marshal.AllocHGlobal(Marshal.SizeOf(typeof(MIDIHDR)));
+        Marshal.StructureToPtr(hdr, pHdr, false);
+
+        uint size = (uint)Marshal.SizeOf(typeof(MIDIHDR));
+        uint r = midiOutPrepareHeader(_hOut, pHdr, size);
+        if (r == 0)
+        {
+            r = midiOutLongMsg(_hOut, pHdr, size);
+            // the device may still be draining the buffer; wait for the done flag
+            for (int i = 0; i < 100; i++)
+            {
+                MIDIHDR back = (MIDIHDR)Marshal.PtrToStructure(pHdr, typeof(MIDIHDR));
+                if ((back.dwFlags & 0x00000001) != 0) break;   // MHDR_DONE
+                Thread.Sleep(5);
+            }
+            midiOutUnprepareHeader(_hOut, pHdr, size);
+        }
+        Marshal.FreeHGlobal(pHdr);
+        Marshal.FreeHGlobal(buf);
+        return r;
     }
 
     public static void CloseOut()
