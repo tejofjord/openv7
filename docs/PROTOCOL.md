@@ -35,9 +35,52 @@ Both interfaces have a zero-bandwidth `alt0`; select `alt1` to stream.
 
 > **The control stream does not need an audio client.** With the vendor driver
 > loaded and nothing playing, the V7 streams control data continuously — 9 892
-> messages in 5 s of platter motion with no audio application open. The driver
-> sustains this itself with a dedicated frame-locked keepalive; see
-> [VENDOR-DRIVER.md](VENDOR-DRIVER.md).
+> messages in 5 s of platter motion with no audio application open.
+
+## ✅ What actually keeps the device alive (measured)
+
+A 90-second USBPcap capture of the **stock Windows driver**, idle except for a
+scripted motor burst, settles this. Over the whole capture the driver sent:
+
+| Direction | Traffic |
+|---|---|
+| iso OUT `0x02` | continuous, 529 kB/s, never pauses |
+| bulk OUT `0x04` | **10 packets total** — and all 10 were the 5 motor commands the script itself sent |
+| EP0 control transfers | **zero** |
+
+So, during 75 s of genuine idle the vendor driver sent **nothing at all** on
+bulk `0x04` and issued **no control transfers whatsoever**. There is no idle
+keepalive on the control-OUT pipe and no periodic status re-arm.
+
+**The only thing sustaining the device is a correctly-paced isochronous OUT
+stream.** That matches the driver's internals — the keepalive is armed from the
+iso write-completion callback (`isocWriteCompleteKeepAlive`, see
+[VENDOR-DRIVER.md](VENDOR-DRIVER.md)) — but the practical point is that
+"keepalive" means *keep the iso stream correctly fed*, not *send filler on
+`0x04`*.
+
+### ⚠️ Implication for OpenV7's long-idle stall
+
+`src/main.c` currently:
+
+1. sends **fixed 156-byte** iso packets — 156 × 8000 = **1,248,000 B/s**, versus
+   the vendor driver's **529,303 B/s**. That is a **2.36× overfeed** of an
+   endpoint whose consumer runs at a fixed 44.1 kHz. The correct shape is
+   packets alternating **72 / 60 bytes** (6 and 5 audio frames of 4 ch × 24-bit),
+   40 packets per URB — see [AUDIO-CODEC.md](AUDIO-CODEC.md);
+2. sends a `0xFD` idle frame on `0x04` every 25 ms — the vendor driver never
+   does this;
+3. re-reads and re-writes the `'I'` status every 2 s — the vendor driver never
+   does this either.
+
+Items 2 and 3 were added empirically to stop the control stream dying at ~24 s.
+Since the real driver needs neither, the likely root cause is item 1: the device
+is being fed 2.36× more audio data than it consumes, and the resulting overrun
+is what silences the control stream. Worth testing by correcting the iso pacing
+first and then removing the two workarounds.
+
+This is a hypothesis about the *cause*; items 1–3 and the vendor driver's
+behaviour are all measured.
 
 ## Bring-up handshake
 
@@ -114,8 +157,21 @@ Byte 2 of the firmware response (step 1) is a decimal-encoded version:
   as much faster than they are.
 - ✅ **`0xE0` timestamp clock = 2,822,400 Hz confirmed** (44100 × 64). Measured
   2,822,904 and 2,822,831 units/sec in two independent runs — within 0.02 %.
-- ✅ **Output**: send one MIDI message per 42-byte frame, `0xFD`-padded, on bulk
-  `0x04`.
+- ✅ **Output**: send one MIDI message per 42-byte frame on bulk `0x04`. The
+  exact frame the vendor driver puts on the wire is:
+
+  ```
+  B0 43 00  FD x38  E0        <- soft-start, captured verbatim
+  |_______|  |____|  |_|
+   3-byte    padding  terminator
+   MIDI
+  ```
+
+  i.e. **3 bytes of MIDI, 38 × `0xFD` padding, then a trailing `0xE0`**. The
+  `0xE0` terminator was not previously documented here. OpenV7 currently pads
+  the whole frame with `0xFD` (`src/main.c`, the `memset` before the `memcpy`),
+  so its last byte is `0xFD` rather than `0xE0`. The device accepts both — the
+  motor responds either way — but the vendor driver is consistent about it.
 
 ## Device identity — SysEx inquiry ✅
 
