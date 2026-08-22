@@ -109,7 +109,9 @@ try {
 
     Step 2 'IDLE - 60s HANDS OFF' @'
   Do NOT touch the controller at all. Hands off the desk.
-  -> THE key step: reveals the driver's idle keepalive on bulk OUT 0x04.
+  -> ALREADY ANSWERED by tools/win/capture-idle.ps1: the driver sends nothing
+     at all on bulk OUT 0x04 while idle, and issues no control transfers. Kept
+     here as a longer-window confirmation.
 '@ 60
 
     Step 3 'SPIN THE PLATTER' @'
@@ -119,9 +121,10 @@ try {
     Step 4 'PLAY AUDIO TO THE V7' @'
   Set "Speakers (Numark V7 Audio - WDM 2.9.64)" as the Windows output device
   and play music for the whole step.
-  -> decides which endpoint actually carries PCM. docs/AUDIO-CODEC.md argues
-     iso-OUT 0x02 is only a keepalive pipe and the real audio rides on the
-     bulk endpoints - this capture settles it.
+  -> THE key remaining step. The endpoint roles are already settled (iso OUT
+     0x02 is PCM out, bulk IN 0x86 is PCM in); what is still unknown is the
+     ENCODING. Silence captures as all zeros, which cannot distinguish plain
+     S24_3LE packing from bit-interleaving. Real audio can.
 '@ 20
 
     Step 5 'LONG IDLE, THEN SPIN AGAIN' @'

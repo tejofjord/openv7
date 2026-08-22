@@ -24,7 +24,11 @@ Wireshark + USBPcap, and optionally do a first-pass analysis.
    (a `libusb_reset_device` is a coin-flip). The real driver surely re-inits a stuck device
    cleanly — I need to see the exact sequence.
 
-**A capture of the Windows driver sitting IDLE, and during an UNPLUG/REPLUG, answers both.**
+**UPDATE: both are now answered** by captures taken with `tools/win/capture-idle.ps1`
+and `tools/win/capture-init.ps1` - see `docs/PROTOCOL.md`. There is no idle
+keepalive on `0x04` at all, and recovery is abort-pipes + SET_CONFIGURATION.
+The remaining open question is the **audio encoding**, which needs a capture
+with real audio playing to the V7.
 
 ## Known protocol (to sanity-check the capture against)
 - Endpoints: **iso OUT `0x02`** (audio playback clock, 156-byte packets) · **bulk IN `0x83`**
@@ -61,10 +65,12 @@ unsure) → Start. Then do these, in one session, jotting rough timestamps:
 2. **~60 seconds doing NOTHING**, hands off — reveals the idle keepalive (the #1 unknown).
 3. **Spin the platter ~10 s.**
 3b. **Play audio to the V7 for ~10 s** — set `Speakers (Numark V7 Audio - WDM)`
-   as the output device and play music. **This is now a high-priority scenario:**
-   it decides which endpoint actually carries PCM. See the hypothesis in
-   `docs/AUDIO-CODEC.md` that iso-OUT `0x02` is only a keepalive pipe and the
-   real audio rides on bulk `0x04` / `0x86`.
+   as the output device and play music. **This is now THE key remaining
+   scenario.** Endpoint roles are already settled (iso OUT `0x02` = PCM out at
+   4 ch × 24-bit, bulk IN `0x86` = PCM in at 64 B/frame); what is still unknown
+   is the **encoding**. Silence captures as all zeros, which cannot distinguish
+   plain `S24_3LE` from bit-interleaving — real audio can. See
+   `docs/AUDIO-CODEC.md`.
 4. **Stop the platter, wait 30–60 s untouched, then spin again** — does it keep reporting? What
    did the driver send during the wait?
 5. **Press each button / pad / move each fader once** — full control map + any LED feedback the

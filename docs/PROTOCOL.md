@@ -82,6 +82,47 @@ first and then removing the two workarounds.
 This is a hypothesis about the *cause*; items 1–3 and the vendor driver's
 behaviour are all measured.
 
+## ✅ Recovery — what the driver actually does (measured)
+
+Captured by restarting the V7's device node under USBPcap
+(`tools/win/capture-init.ps1`), which makes the vendor driver tear its stack
+down and rebuild it. The entire sequence is four operations inside 2 ms:
+
+```
+t+0.000   ABORT_PIPE           iso IN  0x81      (x2)
+t+0.000   ABORT_PIPE           iso OUT 0x02      (x2)
+t+0.000   SELECT_CONFIGURATION (SET_CONFIGURATION, bRequest 9, wLength 8)
+t+0.002   completion  ->  streaming resumes
+```
+
+**No vendor requests, no re-run of the Ploytec handshake, no USB device reset,
+and no port cycle.** The driver aborts the isochronous pipes, re-selects the
+configuration, and starts streaming again. The bulk endpoints were never
+touched.
+
+The libusb equivalent is therefore much lighter than `libusb_reset_device()`:
+
+1. cancel every outstanding iso transfer and wait for the cancellations,
+2. re-select the configuration / alt setting,
+3. resubmit the iso ring.
+
+Note `libusb_reset_device()` is a *stronger* operation than any of this, which
+fits its observed coin-flip behaviour — it invalidates the device handle and
+forces re-enumeration, where the vendor driver only re-selects a configuration
+it already has.
+
+> Scope: this is the driver's **soft** recovery, the one it uses when its own
+> stack restarts. `v7_usb.sys` also contains a harder path ending in
+> `IOCTL_INTERNAL_USB_CYCLE_PORT` (see [VENDOR-DRIVER.md](VENDOR-DRIVER.md))
+> for a genuinely wedged device; that path was not exercised by this capture,
+> because nothing was actually stuck.
+
+### Bulk read sizing, incidentally
+
+The driver reads PCM from bulk IN `0x86` in **131,072-byte (128 KB)** transfers,
+issued roughly every 46 ms — which is the 2.82 MB/s input rate. OpenV7 drains
+this endpoint with much smaller reads.
+
 ## Bring-up handshake
 
 Ploytec vendor + USB-audio control requests, in order (all ✅):

@@ -126,9 +126,15 @@ IoCallDriver cycle port returned :%08X
 ```
 
 Note **`cycle port`** — `IOCTL_INTERNAL_USB_CYCLE_PORT`, which re-enumerates the
-device from the hub without a physical unplug. That is almost certainly the
-"software power cycle" OpenV7 is missing; `libusb_reset_device` is a weaker
-operation and its coin-flip behaviour is consistent with that.
+device from the hub without a physical unplug.
+
+> **Update from the capture.** The driver's *observed* recovery is much lighter
+> than a port cycle: abort the isochronous pipes, re-issue
+> `SET_CONFIGURATION`, resume — four operations in 2 ms, with no vendor
+> requests at all. See the measured sequence in
+> [PROTOCOL.md](PROTOCOL.md#-recovery--what-the-driver-actually-does-measured).
+> The `cycle port` path exists for a genuinely wedged device and was not
+> exercised, so treat it as the escalation, not the normal route.
 
 Detection inputs feeding the broken-stream path:
 
