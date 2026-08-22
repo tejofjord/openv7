@@ -100,17 +100,34 @@ Bulk IN `0x86` carried **all zeros** during both the tone and the silence. Its
 bit-per-byte input layout — but with no signal present, nothing can be
 confirmed.
 
-The obvious suspicion was that the ADC sits muted until something opens the
-input, so this was tested: a WASAPI capture stream was opened on the
-`Line In (Numark V7 Audio)` endpoint for 5 seconds. It delivered **220,059
-frames (44,011/s — the stream is real and running) with zero non-zero bytes**.
-So the endpoint is genuinely streaming digital silence, not gated off.
+Two software explanations were tested and both eliminated:
+
+1. **ADC gated until something opens the input?** No. A WASAPI capture stream
+   on the `Line In (Numark V7 Audio)` endpoint delivered **220,059 frames at
+   44,011/s — a real, running stream — with zero non-zero bytes**.
+2. **Endpoint muted or at zero gain?** No. `IAudioEndpointVolume` reports
+   **mute=0, master 100 %, both channels 100 %**, with `QueryHardwareSupport`
+   = `0x0` (a pure software endpoint with no hardware mute/gain to clear).
+
+So the pipe is open, unmuted, streaming at full rate, and carrying exact
+zeros — there is simply no signal at the converters.
 
 **This one is hard-blocked on physical cabling.** Determining the input
 encoding requires an actual signal at the V7's rear inputs — either a source
 plugged in, or an RCA loopback from the V7's own outputs back to its inputs,
-with a capture running while audio plays. Everything else about the input is
-already measured.
+with a capture running while audio plays. `tools/win/capture-audio.ps1` already
+does everything else; with a loopback in place it would resolve this in one
+run. Everything else about the input is already measured.
+
+> There is one remaining *software* avenue, deliberately not taken. Ozzy
+> documents bit `0x02` of vendor register `'I'` as **input routing / source
+> select**, and `v7_usb.sys` has a `WRITE INPUT SELECT` path — so the input
+> source may well be switchable, conceivably to an internal loopback. Reaching
+> it means sending vendor control requests, which the Windows vendor driver
+> owns exclusively; the only way in is to unbind it and attach WinUSB instead
+> (Zadig or similar). That would break the working driver every other result
+> here depends on, and is not reversible with one click, so it should be a
+> deliberate decision rather than a side effect of chasing this last field.
 
 ## The codec
 

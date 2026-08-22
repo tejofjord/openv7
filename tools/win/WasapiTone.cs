@@ -73,6 +73,31 @@ public static class WasapiTone
         int GetNextPacketSize(out uint numFrames);
     }
 
+    // Method order IS vtable order.
+    [ComImport, Guid("5CDF2C82-841E-4546-9722-0CF74078229A"),
+     InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    interface IAudioEndpointVolume
+    {
+        int RegisterControlChangeNotify(IntPtr notify);
+        int UnregisterControlChangeNotify(IntPtr notify);
+        int GetChannelCount(out uint count);
+        int SetMasterVolumeLevel(float level, IntPtr ctx);
+        int SetMasterVolumeLevelScalar(float level, IntPtr ctx);
+        int GetMasterVolumeLevel(out float level);
+        int GetMasterVolumeLevelScalar(out float level);
+        int SetChannelVolumeLevel(uint ch, float level, IntPtr ctx);
+        int SetChannelVolumeLevelScalar(uint ch, float level, IntPtr ctx);
+        int GetChannelVolumeLevel(uint ch, out float level);
+        int GetChannelVolumeLevelScalar(uint ch, out float level);
+        int SetMute(int mute, IntPtr ctx);
+        int GetMute(out int mute);
+        int GetVolumeStepInfo(out uint step, out uint stepCount);
+        int VolumeStepUp(IntPtr ctx);
+        int VolumeStepDown(IntPtr ctx);
+        int QueryHardwareSupport(out uint mask);
+        int GetVolumeRange(out float min, out float max, out float inc);
+    }
+
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
     struct WAVEFORMATEX
     {
@@ -235,6 +260,53 @@ public static class WasapiTone
         client.Stop();
         Marshal.FreeCoTaskMem(pFormat);
         return string.Format("OK ({0}) frames={1} nonZeroBytes={2}", fmt, totalFrames, nonZeroBytes);
+    }
+
+    /*
+     * Report an endpoint's mute/level, and optionally unmute and raise it.
+     *
+     * The V7's PCM-in endpoint streams continuously but reads as all zeros even
+     * with a capture stream open. If that is because the endpoint is muted or
+     * at zero gain, clearing it should let ADC noise through - and noise, unlike
+     * silence, reveals the frame layout.
+     */
+    public static string EndpointVolume(string deviceId, bool unmuteAndMax)
+    {
+        var enumerator = (IMMDeviceEnumerator)(new MMDeviceEnumerator());
+        IMMDevice dev;
+        int hr = enumerator.GetDevice(deviceId, out dev);
+        if (hr != 0) return "GetDevice failed hr=0x" + hr.ToString("X8");
+
+        Guid iid = new Guid("5CDF2C82-841E-4546-9722-0CF74078229A");
+        object o;
+        hr = dev.Activate(ref iid, CLSCTX_ALL, IntPtr.Zero, out o);
+        if (hr != 0) return "Activate(IAudioEndpointVolume) failed hr=0x" + hr.ToString("X8");
+        var vol = (IAudioEndpointVolume)o;
+
+        int muted; float scalar; uint chCount; uint hw;
+        vol.GetMute(out muted);
+        vol.GetMasterVolumeLevelScalar(out scalar);
+        vol.GetChannelCount(out chCount);
+        vol.QueryHardwareSupport(out hw);
+        string before = string.Format("mute={0} level={1:P1} channels={2} hwSupport=0x{3:X}",
+                                      muted, scalar, chCount, hw);
+
+        for (uint c = 0; c < chCount; c++)
+        {
+            float cv;
+            if (vol.GetChannelVolumeLevelScalar(c, out cv) == 0)
+                before += string.Format(" ch{0}={1:P1}", c, cv);
+        }
+
+        if (!unmuteAndMax) return before;
+
+        vol.SetMute(0, IntPtr.Zero);
+        vol.SetMasterVolumeLevelScalar(1.0f, IntPtr.Zero);
+        for (uint c = 0; c < chCount; c++) vol.SetChannelVolumeLevelScalar(c, 1.0f, IntPtr.Zero);
+
+        vol.GetMute(out muted);
+        vol.GetMasterVolumeLevelScalar(out scalar);
+        return before + string.Format("  ->  after: mute={0} level={1:P1}", muted, scalar);
     }
 
     static void WriteFrames(IntPtr buf, uint frames, int ch, ushort tag, ushort bits,
