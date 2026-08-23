@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 // OpenV7 app-icon renderer. Draws a motorized turntable/vinyl deck on a
-// graphite squircle with a cobalt label and a cyan "motion" arc.
+// graphite squircle with a crimson label and a scarlet "motion" arc.
 //   clang -fobjc-arc -framework Cocoa tools/makeicon.m -o build/makeicon
 //   build/makeicon build/icon_1024.png
 #import <Cocoa/Cocoa.h>
@@ -40,18 +40,18 @@ int main(int argc, const char **argv) {
         [NSGraphicsContext restoreGraphicsState];
 
         // hairline rim
-        [hex(120,150,200,0.18) setStroke];
+        [hex(200,130,130,0.18) setStroke];
         sq.lineWidth = 3; [sq stroke];
 
-        // --- motion arc (cyan) behind the platter ---
+        // --- motion arc (scarlet) behind the platter ---
         [NSGraphicsContext saveGraphicsState];
         NSShadow *glow = [NSShadow new];
-        glow.shadowColor = hex(76,201,255,0.55); glow.shadowBlurRadius = 26; glow.shadowOffset = NSMakeSize(0,0);
+        glow.shadowColor = hex(255,82,68,0.55); glow.shadowBlurRadius = 26; glow.shadowOffset = NSMakeSize(0,0);
         [glow set];
         NSBezierPath *arc = [NSBezierPath bezierPath];
         [arc appendBezierPathWithArcWithCenter:NSMakePoint(c,c) radius:372 startAngle:158 endAngle:328];
         arc.lineWidth = 24; arc.lineCapStyle = NSLineCapStyleRound;
-        [hex(76,201,255,1) setStroke]; [arc stroke];
+        [hex(255,82,68,1) setStroke]; [arc stroke];
         [NSGraphicsContext restoreGraphicsState];
 
         // --- vinyl platter ---
@@ -67,9 +67,9 @@ int main(int argc, const char **argv) {
             ring.lineWidth = 2.2; [ring stroke];
         }
 
-        // --- cobalt label ---
+        // --- crimson label ---
         NSRect label = NSMakeRect(c-132, c-132, 264, 264);
-        NSGradient *lg = [[NSGradient alloc] initWithStartingColor:hex(47,139,255,1) endingColor:hex(10,86,214,1)];
+        NSGradient *lg = [[NSGradient alloc] initWithStartingColor:hex(255,69,58,1) endingColor:hex(176,17,28,1)];
         [lg drawInBezierPath:[NSBezierPath bezierPathWithOvalInRect:label] angle:-70];
         [hex(0,0,0,0.18) setStroke];
         NSBezierPath *lstroke = [NSBezierPath bezierPathWithOvalInRect:label]; lstroke.lineWidth = 3; [lstroke stroke];
