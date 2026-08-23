@@ -11,9 +11,35 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+
       - name: Install libusb
         run: brew install libusb
-      - name: Build
+
+      - name: Build bridge
         run: make
+
+      - name: Unit tests
+        run: make test
+
       - name: Sanity check
         run: ./openv7 --help
+
+      # The menu-bar app and the bundle script were never compiled here, so any
+      # breakage in app/OpenV7App.m or dist/build-app.sh reached a release
+      # unnoticed -- CI was green while the shippable artifact was untested.
+      # This also enforces the deployment target: build-app.sh fails if the
+      # binaries' minos does not match LSMinimumSystemVersion in Info.plist.
+      - name: Build app bundle + DMG
+        run: make app
+
+      - name: Docs lint
+        run: |
+          ./tools/check-docs-test.sh    # the linter's own fixtures first
+          ./tools/check-docs.sh
+
+      - name: Upload DMG
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenV7-dmg
+          path: build/OpenV7.dmg
+          if-no-files-found: error

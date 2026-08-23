@@ -197,22 +197,48 @@ static void outq_push(const unsigned char *msg, int len) {
 }
 
 /* ---- small MIDI message splitter (handles running status) ---- */
-struct midi_split { uint8_t status, data[2]; int ndata, need; };
+struct midi_split { uint8_t status, data[2]; int ndata, need, insysex; };
+/* Length of a complete message INCLUDING its status byte.
+
+   System common used to fall into the `default: return 3` below, which is wrong
+   for three of the five: 0xF1 (MTC quarter frame) and 0xF3 (song select) are
+   TWO bytes, so sizing them at three swallowed the byte that followed and
+   shifted everything after it. 0xF0 (SysEx) has no fixed length at all and was
+   the worst case -- an identity reply, which this device does emit, got chopped
+   into a run of bogus 3-byte channel messages and forwarded as if it were real
+   control data. */
 static int midi_msg_len(uint8_t status) {
+    switch (status) {
+        case 0xF1: case 0xF3:                     return 2;   /* MTC qframe, song select */
+        case 0xF2:                                return 3;   /* song position pointer */
+        case 0xF4: case 0xF5: case 0xF6: case 0xF7: return 1; /* one-byte system common */
+        default: break;
+    }
     switch (status & 0xF0) {
         case 0xC0: case 0xD0: return 2;      /* status + 1 data */
         default:              return 3;      /* status + 2 data */
     }
 }
-/* feed one byte; when a full channel-voice message completes, copy it to out[<=3]
- * and return its length, else return 0. 0xFD/idle and realtime are skipped. */
+/* feed one byte; when a full message completes, copy it to out[<=3] and return
+ * its length, else return 0. 0xFD/idle and realtime are skipped.
+ *
+ * SysEx is DROPPED rather than forwarded: this bridge's outgoing framing is one
+ * message per 42-byte 0xFD-padded frame, which has nowhere to put a message of
+ * arbitrary length. Dropping it is a deliberate limitation; mangling it into
+ * fake channel messages, which is what happened before, is a bug. */
 static int midi_feed(struct midi_split *s, uint8_t x, uint8_t out[3]) {
     if (x == V7_MIDI_IDLE) return 0;
+    if (x >= 0xF8) return 0;                 /* system realtime — ignore, running status survives */
     if (x & 0x80) {
-        if (x >= 0xF8) return 0;             /* system realtime — ignore */
-        s->status = x; s->ndata = 0; s->need = midi_msg_len(x);
+        if (x == 0xF0) { s->insysex = 1; s->status = 0; return 0; }
+        if (x == 0xF7) { s->insysex = 0; s->status = 0; return 0; }
+        s->insysex = 0;
+        s->need = midi_msg_len(x);
+        if (s->need == 1) { s->status = 0; out[0] = x; out[1] = out[2] = 0; return 1; }
+        s->status = x; s->ndata = 0;
         return 0;
     }
+    if (s->insysex) return 0;                /* SysEx payload — see above */
     if (!s->status) return 0;
     s->data[s->ndata++] = x;
     if (s->ndata >= s->need - 1) {
@@ -221,6 +247,9 @@ static int midi_feed(struct midi_split *s, uint8_t x, uint8_t out[3]) {
         int n = s->need;
         if (n == 3) out[2] = s->data[1];
         s->ndata = 0;                        /* running status stays armed */
+        /* ...for CHANNEL messages only. Running status does not apply to system
+           common, so a bare data byte after one must not repeat it. */
+        if (s->status >= 0xF0) s->status = 0;
         return n;
     }
     return 0;
@@ -316,8 +345,10 @@ static void LIBUSB_CALL ka_read_cb(struct libusb_transfer *t) {
         uint8_t status = libusb_control_transfer_get_data(t)[0];
         int8_t mod = (int8_t)(status | 0x20);
         unsigned char *wb = malloc(LIBUSB_CONTROL_SETUP_SIZE);
+        if (!wb) { free(t->buffer); libusb_free_transfer(t); return; }
         libusb_fill_control_setup(wb, 0x40, PL_REQ_STATUS, (uint16_t)(int16_t)mod, 0, 0);
         struct libusb_transfer *wt = libusb_alloc_transfer(0);
+        if (!wt) { free(wb); free(t->buffer); libusb_free_transfer(t); return; }
         libusb_fill_control_transfer(wt, g_dev, wb, ka_write_cb, NULL, 500);
         if (libusb_submit_transfer(wt) != 0) { free(wb); libusb_free_transfer(wt); }
     }
@@ -325,10 +356,41 @@ static void LIBUSB_CALL ka_read_cb(struct libusb_transfer *t) {
 }
 static void ploytec_rearm(void) {
     unsigned char *rb = malloc(LIBUSB_CONTROL_SETUP_SIZE + 1);
+    if (!rb) return;
     libusb_fill_control_setup(rb, 0xC0, PL_REQ_STATUS, 0, 0, 1);
     struct libusb_transfer *rt = libusb_alloc_transfer(0);
+    if (!rt) { free(rb); return; }
     libusb_fill_control_transfer(rt, g_dev, rb, ka_read_cb, NULL, 500);
     if (libusb_submit_transfer(rt) != 0) { free(rb); libusb_free_transfer(rt); }
+}
+
+/* Clear a stalled endpoint without blocking the event thread.
+
+   All three call sites for this run from inside a transfer callback -- i.e. on
+   the thread currently executing libusb_handle_events. Calling the SYNCHRONOUS
+   libusb_clear_halt() there is the hazard the ploytec_rearm comment above
+   describes: a synchronous transfer runs its own nested event loop and stops
+   servicing the iso ring while it waits. Stalls are rare, so this never
+   surfaced, but the one moment it fires is a moment the stream is already
+   unhealthy -- the worst possible time to stall the pump holding up the
+   44.1 kHz clock.
+
+   The fix is to DEFER the same call, not to replace it. An async
+   CLEAR_FEATURE(ENDPOINT_HALT) control transfer looks equivalent and is not:
+   on macOS libusb_clear_halt goes to ClearPipeStallBothEnds(), which clears the
+   HOST side of the pipe and resets the data toggle as well as sending the
+   request to the device. Sending only the device half leaves the host pipe
+   stalled, so every following transfer fails LIBUSB_ERROR_PIPE and the retry
+   path spins -- worse than the blocking call it was meant to improve on.
+
+   So: callbacks queue an endpoint here, and the main loop drains the queue
+   between handle_events calls, where blocking is harmless. */
+#define CLEAR_MAX 8
+static unsigned char g_clear_q[CLEAR_MAX];
+static int g_nclear = 0;
+static void clear_halt_later(unsigned char ep) {
+    for (int i = 0; i < g_nclear; i++) if (g_clear_q[i] == ep) return;   /* already queued */
+    if (g_nclear < CLEAR_MAX) g_clear_q[g_nclear++] = ep;
 }
 
 /* bulk-IN watchdog state (definition of arm_bulk is further down)
@@ -370,16 +432,35 @@ static void usb_lost(int err, const char *name) {
     g_quit = 1;
 }
 
+/* Runs on the main loop, never in a callback -- see clear_halt_later. */
+static void clear_halt_drain(void) {
+    for (int i = 0; i < g_nclear; i++) {
+        int r = libusb_clear_halt(g_dev, g_clear_q[i]);
+        if (r == 0) continue;
+        if (usb_gone(r)) { usb_lost(r, "clear-halt"); break; }
+        fprintf(stderr, "OpenV7: clear-halt on 0x%02X failed (%s)\n",
+                g_clear_q[i], libusb_error_name(r));
+    }
+    g_nclear = 0;
+}
+
 static struct libusb_transfer *g_t_aux = NULL;
 static int g_in_live[CTRL_IN_NXFER];
 static int g_aux_live = 0;
 static long g_ctrl_bytes = 0;          /* control-IN traffic, for --diag */
-static void arm_bulk(struct libusb_transfer *t, int *live, unsigned char ep, const char *name);
+/* Last-complained-at, one clock PER ENDPOINT. A single shared static meant a
+   persistently failing pipe griped once a second and silenced every OTHER
+   pipe's message for that same second -- so a second endpoint failing at the
+   same time was invisible in the log, which is precisely when you most need to
+   see both. */
+static time_t g_gripe_ctrl_in, g_gripe_aux, g_gripe_iso_out, g_gripe_iso_in;
+static void arm_bulk(struct libusb_transfer *t, int *live, unsigned char ep,
+                     const char *name, time_t *gripe);
 
 /* iso rings, kept addressable so the main loop can re-arm them (see arm_iso) */
 static struct libusb_transfer *g_iso_out[ISO_NXFER], *g_iso_in[ISO_NXFER];
 static int g_iso_out_live[ISO_NXFER], g_iso_in_live[ISO_NXFER];
-static void arm_iso(struct libusb_transfer *t, int *live, int pace, const char *name);
+static void arm_iso(struct libusb_transfer *t, int *live, int pace, const char *name, time_t *gripe);
 
 /* ---- streaming-health counters (for the --diag rate report) ---- */
 static long g_isoout_cmpl = 0, g_isoin_cmpl = 0;
@@ -395,20 +476,20 @@ static void LIBUSB_CALL iso_cb(struct libusb_transfer *t) {
        fractional 0.0125 frame/packet is lost and the stream drifts slow.
        arm_iso does the pacing and, unlike the bare submit this replaces, CHECKS
        the result -- the silence buffer is already zero, only lengths move. */
-    arm_iso(t, &g_iso_out_live[idx], 1, "iso-out");
+    arm_iso(t, &g_iso_out_live[idx], 1, "iso-out", &g_gripe_iso_out);
 }
 static void LIBUSB_CALL drain_cb(struct libusb_transfer *t) {
     g_aux_live = 0;
     if (t->status == LIBUSB_TRANSFER_NO_DEVICE) { g_quit = 1; return; }
-    if (t->status == LIBUSB_TRANSFER_STALL) libusb_clear_halt(g_dev, V7_EP_AUX_IN);
-    if (!g_quit) arm_bulk(t, &g_aux_live, V7_EP_AUX_IN, "aux-drain");  /* discard audio-return */
+    if (t->status == LIBUSB_TRANSFER_STALL) clear_halt_later(V7_EP_AUX_IN);
+    if (!g_quit) arm_bulk(t, &g_aux_live, V7_EP_AUX_IN, "aux-drain", &g_gripe_aux);  /* discard audio-return */
 }
 static void LIBUSB_CALL isoin_cb(struct libusb_transfer *t) {
     int idx = (int)(intptr_t)t->user_data;
     g_iso_in_live[idx] = 0;
     if (t->status == LIBUSB_TRANSFER_NO_DEVICE) { usb_lost(LIBUSB_ERROR_NO_DEVICE, "iso-in"); return; }
     g_isoin_cmpl++;
-    arm_iso(t, &g_iso_in_live[idx], 0, "iso-in");     /* drain iso-IN — REQUIRED or the
+    arm_iso(t, &g_iso_in_live[idx], 0, "iso-in", &g_gripe_iso_in);  /* drain iso-IN — REQUIRED or the
                                                          device stalls its control stream */
 }
 static void LIBUSB_CALL out_cb(struct libusb_transfer *t) {
@@ -436,8 +517,8 @@ static void LIBUSB_CALL ctrl_in_cb(struct libusb_transfer *t) {
         }
     }
     if (t->status == LIBUSB_TRANSFER_NO_DEVICE) { g_quit = 1; return; }
-    if (t->status == LIBUSB_TRANSFER_STALL) libusb_clear_halt(g_dev, V7_EP_CTRL_IN);
-    if (!g_quit) arm_bulk(t, &g_in_live[idx], V7_EP_CTRL_IN, "control-IN");
+    if (t->status == LIBUSB_TRANSFER_STALL) clear_halt_later(V7_EP_CTRL_IN);
+    if (!g_quit) arm_bulk(t, &g_in_live[idx], V7_EP_CTRL_IN, "control-IN", &g_gripe_ctrl_in);
 }
 
 /* ---- bulk-IN re-arm watchdog -------------------------------------------
@@ -452,17 +533,17 @@ static void LIBUSB_CALL ctrl_in_cb(struct libusb_transfer *t) {
 
    Now every submit is checked, a STALL clears the halt first, and the main loop
    re-arms anything not in flight, so the pipe self-heals instead of dying. */
-static void arm_bulk(struct libusb_transfer *t, int *live, unsigned char ep, const char *name) {
+static void arm_bulk(struct libusb_transfer *t, int *live, unsigned char ep,
+                     const char *name, time_t *gripe) {
     if (g_quit || !t || *live) return;
     int r = libusb_submit_transfer(t);
     if (r == 0) { *live = 1; return; }
     if (usb_gone(r)) { usb_lost(r, name); return; }   /* dead handle: exit, do not spin */
-    if (r == LIBUSB_ERROR_PIPE) libusb_clear_halt(g_dev, ep);
-    static time_t last_gripe;           /* don't spam the log on a persistent fault */
-    time_t now = time(NULL);
-    if (now != last_gripe) {
+    if (r == LIBUSB_ERROR_PIPE) clear_halt_later(ep);
+    time_t now = time(NULL);            /* don't spam the log on a persistent fault */
+    if (now != *gripe) {
         fprintf(stderr, "OpenV7: %s submit failed (%s) — retrying\n", name, libusb_error_name(r));
-        last_gripe = now;
+        *gripe = now;
     }
 }
 
@@ -479,25 +560,26 @@ static void arm_bulk(struct libusb_transfer *t, int *live, unsigned char ep, con
 
    Checking the result and re-arming from the main loop makes the ring
    self-healing instead of silently draining. */
-static void arm_iso(struct libusb_transfer *t, int *live, int pace, const char *name) {
+static void arm_iso(struct libusb_transfer *t, int *live, int pace, const char *name, time_t *gripe) {
     if (g_quit || !t || *live) return;
     if (pace) iso_pace(t);              /* lengths carry the rate; re-pace every submit */
     int r = libusb_submit_transfer(t);
     if (r == 0) { *live = 1; return; }
     if (usb_gone(r)) { usb_lost(r, name); return; }
-    static time_t last_gripe;
     time_t now = time(NULL);
-    if (now != last_gripe) {
+    if (now != *gripe) {
         fprintf(stderr, "OpenV7: %s submit failed (%s) — retrying\n", name, libusb_error_name(r));
-        last_gripe = now;
+        *gripe = now;
     }
 }
 
 /* submit one queued outgoing frame to the device (fire-and-forget) */
 static void submit_out(const unsigned char *frame) {
     unsigned char *buf = malloc(V7_OUT_FRAME_LEN);
+    if (!buf) return;
     memcpy(buf, frame, V7_OUT_FRAME_LEN);
     struct libusb_transfer *t = libusb_alloc_transfer(0);
+    if (!t) { free(buf); return; }
     libusb_fill_bulk_transfer(t, g_dev, V7_EP_CTRL_OUT, buf, V7_OUT_FRAME_LEN, out_cb, NULL, 500);
     if (libusb_submit_transfer(t) != 0) { free(buf); libusb_free_transfer(t); }
 }
@@ -601,35 +683,43 @@ int main(int argc, char **argv) {
            amount the device is fed. */
         unsigned char *b = calloc(1, V7_ISO_PKT_MAX * ISO_NPKT_OUT);
         g_iso_out[i] = libusb_alloc_transfer(ISO_NPKT_OUT);
+        /* Bail rather than limp. A short iso ring is not a degraded stream, it
+           is the "healthy from the outside, dead on the wire" failure mode the
+           arm_iso comment describes -- and an unchecked calloc here would hand
+           libusb a NULL buffer and crash instead. */
+        if (!b || !g_iso_out[i]) { fprintf(stderr, "OpenV7: out of memory building the iso-OUT ring\n"); return 5; }
         libusb_fill_iso_transfer(g_iso_out[i], g_dev, V7_EP_AUDIO_OUT, b,
                                  V7_ISO_PKT_MAX * ISO_NPKT_OUT, ISO_NPKT_OUT, iso_cb,
                                  (void *)(intptr_t)i, 1000);
-        arm_iso(g_iso_out[i], &g_iso_out_live[i], 1, "iso-out");   /* paces, then submits checked */
+        arm_iso(g_iso_out[i], &g_iso_out_live[i], 1, "iso-out", &g_gripe_iso_out);   /* paces, then submits checked */
     }
     /* iso-IN: the device stalls its control stream unless this endpoint is
        actively drained — the fix for "controls only report at startup". */
     for (int i = 0; i < ISO_NXFER; i++) {
         unsigned char *b = calloc(1, V7_ISO_IN_PKT_SIZE * ISO_NPKT_IN);
         g_iso_in[i] = libusb_alloc_transfer(ISO_NPKT_IN);
+        if (!b || !g_iso_in[i]) { fprintf(stderr, "OpenV7: out of memory building the iso-IN ring\n"); return 5; }
         libusb_fill_iso_transfer(g_iso_in[i], g_dev, V7_EP_AUDIO_IN, b,
                                  V7_ISO_IN_PKT_SIZE * ISO_NPKT_IN, ISO_NPKT_IN, isoin_cb,
                                  (void *)(intptr_t)i, 1000);
         libusb_set_iso_packet_lengths(g_iso_in[i], V7_ISO_IN_PKT_SIZE);
-        arm_iso(g_iso_in[i], &g_iso_in_live[i], 0, "iso-in");
+        arm_iso(g_iso_in[i], &g_iso_in_live[i], 0, "iso-in", &g_gripe_iso_in);
     }
     /* control-IN ring + audio-return drain */
     static unsigned char aux[512];
     for (int i = 0; i < CTRL_IN_NXFER; i++) {
         unsigned char *cb_buf = calloc(1, 512);
         g_t_in[i] = libusb_alloc_transfer(0);
+        if (!cb_buf || !g_t_in[i]) { fprintf(stderr, "OpenV7: out of memory building the control-IN ring\n"); return 5; }
         libusb_fill_bulk_transfer(g_t_in[i], g_dev, V7_EP_CTRL_IN, cb_buf, 512,
                                   ctrl_in_cb, (void *)(intptr_t)i, 0);
-        arm_bulk(g_t_in[i], &g_in_live[i], V7_EP_CTRL_IN, "control-IN");
+        arm_bulk(g_t_in[i], &g_in_live[i], V7_EP_CTRL_IN, "control-IN", &g_gripe_ctrl_in);
     }
     struct libusb_transfer *t_aux = libusb_alloc_transfer(0);
+    if (!t_aux) { fprintf(stderr, "OpenV7: out of memory building the aux-drain transfer\n"); return 5; }
     libusb_fill_bulk_transfer(t_aux, g_dev, V7_EP_AUX_IN,  aux, sizeof aux, drain_cb,   NULL, 0);
     g_t_aux = t_aux;
-    arm_bulk(t_aux, &g_aux_live, V7_EP_AUX_IN,  "aux-drain");
+    arm_bulk(t_aux, &g_aux_live, V7_EP_AUX_IN,  "aux-drain", &g_gripe_aux);
 
     if (g_learn)
         fprintf(stderr, "OpenV7: LEARN mode — touch every control once, then Ctrl-C for the map.\n");
@@ -642,6 +732,7 @@ int main(int argc, char **argv) {
     while (!g_quit) {
         struct timeval tv = { 0, 20000 };
         libusb_handle_events_timeout(g_ctx, &tv);
+        clear_halt_drain();     /* stall recovery, deferred out of the callbacks */
         /* EP0 status re-arm, every 2 s (secondary keepalive) — legacy only. */
         if (g_keepalive) { time_t now = time(NULL);
           if (now - rearm_t >= 2) { ploytec_rearm(); rearm_t = now; } }
@@ -656,15 +747,15 @@ int main(int argc, char **argv) {
            whole session -- the fault that presented as "the GUI registers
            nothing until you restart the bridge". No-op when both are live. */
         for (int i = 0; i < CTRL_IN_NXFER; i++)
-            arm_bulk(g_t_in[i], &g_in_live[i], V7_EP_CTRL_IN, "control-IN");
-        arm_bulk(g_t_aux, &g_aux_live, V7_EP_AUX_IN,  "aux-drain");
+            arm_bulk(g_t_in[i], &g_in_live[i], V7_EP_CTRL_IN, "control-IN", &g_gripe_ctrl_in);
+        arm_bulk(g_t_aux, &g_aux_live, V7_EP_AUX_IN,  "aux-drain", &g_gripe_aux);
         /* Same watchdog for the iso rings. A transfer whose resubmit failed is
            gone from the ring with no callback to notice; without this the ring
            drains silently and takes the control stream with it. No-op when all
            32 are in flight, which is the normal case. */
         for (int i = 0; i < ISO_NXFER; i++) {
-            arm_iso(g_iso_out[i], &g_iso_out_live[i], 1, "iso-out");
-            arm_iso(g_iso_in[i],  &g_iso_in_live[i],  0, "iso-in");
+            arm_iso(g_iso_out[i], &g_iso_out_live[i], 1, "iso-out", &g_gripe_iso_out);
+            arm_iso(g_iso_in[i],  &g_iso_in_live[i],  0, "iso-in",  &g_gripe_iso_in);
         }
         /* drain outgoing MIDI to the device */
         int sent_real = 0;
@@ -698,11 +789,16 @@ int main(int argc, char **argv) {
         if (g_diag) {
             time_t now = time(NULL);
             if (now != diag_t) {
-                int iso_armed = 0;
+                int iso_armed = 0, in_armed = 0;
                 for (int i = 0; i < ISO_NXFER; i++) iso_armed += g_iso_out_live[i] + g_iso_in_live[i];
+                /* Counted with a LOOP, not g_in_live[0]+[1]+[2]+[3]. The unrolled
+                   version silently under-reported the moment CTRL_IN_NXFER changed
+                   -- a health readout that lies when you tune the thing it measures
+                   is worse than no readout. */
+                for (int i = 0; i < CTRL_IN_NXFER; i++) in_armed += g_in_live[i];
                 fprintf(stderr, "  [diag] iso-out/s=%ld iso-in/s=%ld  ctrl-bytes=%ld in-armed=%d/%d iso-armed=%d/%d  (healthy: ~200/~62)\n",
                         g_isoout_cmpl - diag_o0, g_isoin_cmpl - diag_i0, g_ctrl_bytes,
-                        g_in_live[0]+g_in_live[1]+g_in_live[2]+g_in_live[3], CTRL_IN_NXFER,
+                        in_armed, CTRL_IN_NXFER,
                         iso_armed, ISO_NXFER * 2);
                 diag_o0 = g_isoout_cmpl; diag_i0 = g_isoin_cmpl; diag_t = now;
             }

@@ -55,9 +55,21 @@ Continuous controls use the standard MIDI 14-bit convention — **coarse on CC
 | `0x46` | `0x4E` | **Motor START TIME knob** | ✅ |
 | `0x47` | `0x4F` | **Motor STOP TIME knob** | ✅ |
 | `0x44` | — | **Browse / track select knob** | ✅ |
-| `0x56`, `0x58` | | FX parameter — ⚠️ **RELATIVE**, not absolute | `0x58` ✅ measured |
+| `0x58` | `0x56` ⚠️ | FX parameter — ⚠️ **RELATIVE**, not absolute | `0x58` ✅ measured; the deck split is **not** |
 | `0x57` + `0x77` | `0x59` + `0x79` | FX slider (coarse + fine) | ✅ |
 | `0x5A` | `0x5B` | FX select — ⚠️ **RELATIVE**; deck pair, both halves measured | ✅ |
+
+> ⚠️ **FX PARAM's deck split is inferred, not measured.** Only `0x58` has been
+> seen on the wire, and the capture that produced it did not record the DECK
+> SELECT position — the exact mistake the FX SELECT note below warns about.
+> `0x56` is listed as its deck-B partner because the two arrived together, but
+> that assignment fits **no** block offset on this device: every other block runs
+> deck B *above* deck A (buttons +`0x21`, LEDs +`0x16`, motor +`0x0A`, FX slider
+> +`0x02`), and `0x56` is *below* `0x58`. It may well be the other way round.
+>
+> The tester binds both addresses, so the knob lights on either deck regardless;
+> only the A/B labelling is at stake. **To settle it:** turn FX PARAM with the
+> switch on A, then on B, recording the switch position with each capture.
 
 Each platter position message is paired 1:1 with a `0xE0` pitch-bend carrying a
 14-bit timestamp on a **2,822,400 Hz** clock ✅ — that pairing is what yields
@@ -199,6 +211,18 @@ note-on with zero velocity, **never** note-off `0x80` ✅. Code that listens for
 | `0x29` | `0x4A` | `loop_out` | LOOP OUT |
 | `0x2A` | `0x4B` | `Select` | SELECT |
 | `0x2B` | `0x4C` | `Reloop` | RELOOP |
+
+> ⚠️ **`0x24` is labelled two different things in this repo, and neither is
+> measured.** This table calls it RELOOP / EXIT (from the Mixxx key
+> `reloop_exit`); the app's panel calls it LOOP CONTROL. They cannot both be
+> right, and `0x2B` is *separately* mapped as RELOOP in both places, so one of
+> the two is a duplicate.
+>
+> Remember what the "Likely control" column means: **the addresses in this table
+> are measured, the functions are not.** They come from the Mixxx mapping, which
+> is a corroborating source and not this hardware. Recorded rather than resolved
+> because resolving it needs someone at a V7 pressing the button in the loop
+> section and reading the note number — not another round of inference.
 
 Non-deck buttons:
 
@@ -377,7 +401,7 @@ gap — see the deck-select section below.
 
 Flipping the rear-panel switch produces, in one burst:
 
-```
+```text
 90 5C 7F      deck-select event      (and 90 5C 00 on release)
 B0 7D 01      switch POSITION        00 = deck A, 01 = deck B
 B0 4D / 4F / 59 / 79 / 4E ...        state dump of the new deck's controls
@@ -520,7 +544,7 @@ own position counter, which is how the motor set was measured.
 
 Both directions can be verified on hardware with the Windows tooling:
 
-```
+```powershell
 powershell -ExecutionPolicy Bypass -File .\tools\win\midi-learn.ps1   # inputs
 powershell -ExecutionPolicy Bypass -File .\tools\win\led-probe.ps1    # outputs
 ```

@@ -109,7 +109,7 @@ Captured by restarting the V7's device node under USBPcap
 (`tools/win/capture-init.ps1`), which makes the vendor driver tear its stack
 down and rebuild it. The entire sequence is four operations inside 2 ms:
 
-```
+```text
 t+0.000   ABORT_PIPE           iso IN  0x81      (x2)
 t+0.000   ABORT_PIPE           iso OUT 0x02      (x2)
 t+0.000   SELECT_CONFIGURATION (SET_CONFIGURATION, bRequest 9, wLength 8)
@@ -201,7 +201,7 @@ Byte 2 of the firmware response (step 1) is a decimal-encoded version:
 - ✅ **Inbound frame layout** (bulk IN `0x83`), captured verbatim while the
   platter was turning:
 
-  ```
+  ```text
   b0 00 7e   e0 71 75   FD x35   00
   |________| |________| |_____|  |_|
    CC 0x00    pitch-bend padding  terminator
@@ -255,7 +255,7 @@ Byte 2 of the firmware response (step 1) is a decimal-encoded version:
 - ✅ **Output**: send one MIDI message per 42-byte frame on bulk `0x04`. The
   exact frame the vendor driver puts on the wire is:
 
-  ```
+  ```text
   B0 43 00  FD x38  E0        <- soft-start, captured verbatim
   |_______|  |____|  |_|
    3-byte    padding  terminator
@@ -274,7 +274,7 @@ The V7 answers the **MIDI Universal Non-Realtime Device Inquiry** with a
 vendor-format reply. This is the only way to get a unique identifier out of the
 unit: its USB descriptor reports `NO_SERIAL_NUMBER`.
 
-```
+```text
 host   F0 7E <dev> 06 01 F7            # <dev> = 00, 01 or 7F, all work
 device F0 00 01 3F 7F 75 07 00 02 04 01 00 02 08
        30 4E 31 31 30 30 31 31 38 38 31 30 33 34 32 38 F7
@@ -328,7 +328,7 @@ platter's own position counter as a tachometer (see
 one of sequencing, not of the command: the direction latch is only sampled when
 the motor starts. It must be issued **while the platter is stopped**:
 
-```
+```text
 B0 42 00      # instant stop  (must actually be stopped)
 B0 46 01      # latch reverse
 B0 43 00      # soft start -> runs backwards
@@ -363,7 +363,7 @@ across most of its travel and jump at the boundaries.
 A **signed 14-bit two's-complement** value split MSB/LSB across the standard
 MIDI pair (`0x69` = `0x49` + 32):
 
-```
+```text
 v14 = (msb << 7) | lsb          # 0 .. 16383
 s   = v14 < 8192 ? v14 : v14 - 16384
 speed = nominal_rpm * (1 + s / 10000)

@@ -51,7 +51,7 @@ and Windows enumerates both a `Speakers (Numark V7 Audio)` **and** a
 The driver has a **dedicated keepalive pipe and transaction stream**, separate
 from the audio in/out streams:
 
-```
+```text
 m_pcOutPipeKeepAlive is %p
 m_pcOutPipeKeepAlive->Handle is %p
 PGDevice::requestIOKeepAlive() no free-irp found
@@ -64,7 +64,7 @@ Three things follow, and together they explain the long-idle stall:
 1. **It is a first-class transaction stream.** The keepalive has its own
    `initNextTransaction…` scheduler, exactly parallel to the audio ones:
 
-   ```
+   ```text
    initNextTransactionIn        to late current:%d diff:%d NTF:%d lostFrames:%d
    initNextTransactionOut       to late current:%d diff:%d NTF:%d lostFrames:%d
    initNextTransactionKeepAlive CALLBACK to late …
@@ -90,7 +90,7 @@ stream stalls or drifts.
 
 Related, for the MIDI/control direction specifically:
 
-```
+```text
 USBMidiPattern::initForBulk sr:%d rtsBulkOutFramesPerBlock:%d
 rtsProcessBulkOutMIDI iUSBFramesAhead < 0 (%d)
 ALERT mRtsBulkOutFramesPerBlock==0
@@ -106,7 +106,7 @@ function of `sr`, not a magic constant.
 There is an explicit "stream broken" state machine, deliberately punted off the
 interrupt path onto a worker thread:
 
-```
+```text
 PGDevice::irqlOnStreamBroken from %s
 PGDevice::irqlOnStreamBroken() - IRQ Level %d below DISPATCH_LEVEL
 PGKernelDevice::handleStreamBroken
@@ -119,7 +119,7 @@ KernelThreadBank::threadedHandleStreamBroken
 
 and a device-level reset distinct from a USB port reset:
 
-```
+```text
 RESET REQUEST TO DEVICE
 RESET REQUEST TO DEVICE - from ASIO
 IoCallDriver cycle port returned :%08X
@@ -138,7 +138,7 @@ device from the hub without a physical unplug.
 
 Detection inputs feeding the broken-stream path:
 
-```
+```text
 PGDevice::onAjInPipeHalted m_bStreamingStarted:%d mbDeviceHardwareFailure:%d
 PGDevice::onHardwareDeviceFailure - ignore during installation
 out of sync during start %d errors
@@ -152,7 +152,7 @@ i.e. a halted IN pipe or an error counter crossing a threshold triggers it.
 The Ploytec bit-sliced format is managed by a "frame pattern" computed from the
 stream geometry, with an observer that validates and repairs alignment:
 
-```
+```text
 InitFramePattern freq:%d bpsin:%d chin:%d bpsout:%d chout:%d
 PGFramePatternObserver::isocReadComplete repair len:%d expected frames:%d new:%d
 FramePattern Locked - reset nErrorCounter
@@ -168,7 +168,7 @@ alignment search.
 
 ## 🧩 A userspace door into the device
 
-```
+```text
 PGIOCTL_STD_VENDOR_REQUEST deviceRequest returned:%08X
 Error: sPGIOCTL_STD_VENDOR_REQUEST STATUS_INVALID_PARAMETER_3 uBufferLength:%d VENDOR_OR_CLASS_REQUEST:%d
 ALERT: pUrb->UrbControlVendorClassRequest.TransferBufferLength(%d) > uLength(%d)
@@ -196,7 +196,7 @@ is an Atmel AVR32 **UC3** with readable/writable user flash, and
 
 ## Reproducing
 
-```
+```powershell
 powershell -ExecutionPolicy Bypass -File .\tools\win\strings.ps1 `
     -Path C:\Windows\System32\drivers\v7_usb.sys -Min 5 | Sort-Object
 ```
