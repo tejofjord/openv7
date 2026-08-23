@@ -870,6 +870,14 @@ static NSColor *HEX(int r,int g,int b,double a){ return [NSColor colorWithSRGBRe
    while the old one still holds the USB interfaces is the LIBUSB_ERROR_BUSY
    race the wait exists to prevent. The guard makes pumping safe. */
 @property (assign) BOOL stopping;
+/* When the current bridge process was launched, and how many times we have
+   relaunched without it reaching a stable state. Both feed -refresh; see the
+   comment there for why "the process exists" is not a usable answer. */
+@property (assign) NSTimeInterval bridgeUpSince;
+@property (assign) int launchCount;
+/* Last RPM the operator picked with the 33 / 45 buttons, so "Motor" starts at
+   the speed they actually chose. 0 = 33 1/3, 1 = 45. */
+@property (assign) uint8_t testRpm;
 - (void)flushRx;
 @end
 
@@ -896,6 +904,21 @@ static MIDIEndpointRef findEndpointNamed(NSString *name, BOOL source) {
     return 0;
 }
 
+/* Length of a complete MIDI message INCLUDING its status byte. Mirrors
+   midi_msg_len() in src/main.c, which had the identical defect: everything that
+   was not 0xC0/0xD0 was sized at three bytes, so 0xF1 (MTC quarter frame) and
+   0xF3 (song select) each consumed the byte after them and shifted the rest of
+   the packet. 0xF0 has no fixed length and is handled separately below. */
+static int midiMsgLen(uint8_t s) {
+    switch(s){
+        case 0xF1: case 0xF3: return 2;
+        case 0xF2:            return 3;
+        case 0xF4: case 0xF5: case 0xF6: case 0xF7: return 1;
+        default: break;
+    }
+    return ((s&0xF0)==0xC0||(s&0xF0)==0xD0) ? 2 : 3;
+}
+
 static void MIDIReadCB(const MIDIPacketList *pl, void *a, void *b) {
     (void)a;(void)b;
     const MIDIPacket *p=&pl->packet[0];
@@ -903,10 +926,17 @@ static void MIDIReadCB(const MIDIPacketList *pl, void *a, void *b) {
     for(unsigned i=0;i<pl->numPackets;i++){
         for(unsigned j=0;j<p->length;){
             uint8_t s=p->data[j];
-            if(s<0x80 || s>=0xF8){ j++; continue; }
-            uint8_t d0=(j+1<p->length)?p->data[j+1]:0;
-            uint8_t d1=(j+2<p->length)?p->data[j+2]:0;
-            int len=((s&0xF0)==0xC0||(s&0xF0)==0xD0)?2:3;
+            if(s>=0xF8){ j++; continue; }                 /* system realtime */
+            if(s==0xF0){                                  /* SysEx: skip to its 0xF7 */
+                j++;
+                while(j<p->length && p->data[j]!=0xF7) j++;
+                if(j<p->length) j++;
+                continue;
+            }
+            if(s<0x80){ j++; continue; }                   /* stray data byte */
+            int len=midiMsgLen(s);
+            uint8_t d0=(len>1 && j+1<p->length)?p->data[j+1]:0;
+            uint8_t d1=(len>2 && j+2<p->length)?p->data[j+2]:0;
             g_rxq[g_rxw % RXQ]=(struct rxm){s,d0,d1}; g_rxw++; g_rxcount++;
             j+=len;
         }
@@ -958,7 +988,9 @@ static void MIDIReadCB(const MIDIPacketList *pl, void *a, void *b) {
             dateStyle:NSDateFormatterShortStyle timeStyle:NSDateFormatterMediumStyle]]
         dataUsingEncoding:NSUTF8StringEncoding]];
     t.standardError = elog ?: [NSFileHandle fileHandleWithNullDevice];
-    NSError *e=nil; if([t launchAndReturnError:&e]) _task=t;
+    NSError *e=nil;
+    if([t launchAndReturnError:&e]){ _task=t; _bridgeUpSince=[NSDate timeIntervalSinceReferenceDate]; _launchCount++; }
+    else { NSLog(@"OpenV7: could not launch the bridge: %@", e); }
     _connected=NO;   // reconnect the tester to the freshly-published source
     [self refresh];
 }
@@ -1070,11 +1102,23 @@ static void MIDIReadCB(const MIDIPacketList *pl, void *a, void *b) {
 - (void)flushRx {
     [self updateMidiStat];
     if(!_dev) return;
+    /* DRAIN under the lock, then release it before touching anything else.
+
+       The ring exists to keep CoreMIDI's time-constrained read thread off the
+       main thread -- and holding g_rxmtx across the whole drain threw that away.
+       flashStatus alone is a linear scan over 47 controls PER MESSAGE, and the
+       platter streams ~1000 messages/s, so MIDIReadCB spent that time blocked on
+       a mutex held by the UI. Copy first; do the work after. */
+    static struct rxm batch_in[RXQ];
+    int nin=0;
     pthread_mutex_lock(&g_rxmtx);
     if(g_rxw - g_rxr > RXQ) g_rxr = g_rxw - RXQ;          /* dropped overflow */
+    while(g_rxr < g_rxw && nin < RXQ){ batch_in[nin++]=g_rxq[g_rxr % RXQ]; g_rxr++; }
+    pthread_mutex_unlock(&g_rxmtx);
+
     NSMutableString *batch=[NSMutableString string]; int shown=0; BOOL learned=NO;
-    while(g_rxr < g_rxw){
-        struct rxm m=g_rxq[g_rxr % RXQ]; g_rxr++;
+    for(int k=0;k<nin;k++){
+        struct rxm m=batch_in[k];
         if([_dev bindArmedToStatus:m.s d0:m.d0]) learned=YES;
         [_dev flashStatus:m.s d0:m.d0 d1:m.d1];
         BOOL hb=(m.s==0xB0 && (m.d0==0x7d||m.d0==0x6e));
@@ -1083,7 +1127,6 @@ static void MIDIReadCB(const MIDIPacketList *pl, void *a, void *b) {
             [batch appendFormat:@"%02x %02x %02x  %s\n",m.s,m.d0,m.d1,t]; shown++;
         }
     }
-    pthread_mutex_unlock(&g_rxmtx);
     if(learned) [self updateLearnTitle];
     if(batch.length && _log){
         NSAttributedString *as=[[NSAttributedString alloc] initWithString:batch attributes:@{
@@ -1106,11 +1149,15 @@ static void MIDIReadCB(const MIDIPacketList *pl, void *a, void *b) {
         styleMask:NSWindowStyleMaskTitled|NSWindowStyleMaskClosable|NSWindowStyleMaskResizable
         backing:NSBackingStoreBuffered defer:NO];
     _tester.title=@"OpenV7 — Tester"; _tester.releasedWhenClosed=NO; [_tester center];
-    _tester.minSize=NSMakeSize(980,700);
+    _tester.minSize=NSMakeSize(900,640);
     NSView *cv=_tester.contentView;
 
+    /* The panel takes ALL the slack in both axes; the right-hand pane keeps its
+       312 pt and rides the right edge. Previously the panel was width-FIXED
+       (NSViewMaxXMargin) while the log below was right-pinned, so the two moved
+       independently on a horizontal resize. */
     _dev=[[DeviceView alloc] initWithFrame:NSMakeRect(16,16,724,800)];
-    _dev.autoresizingMask=NSViewHeightSizable|NSViewMaxXMargin; _dev.delegate=self;
+    _dev.autoresizingMask=NSViewWidthSizable|NSViewHeightSizable; _dev.delegate=self;
     _dev.wantsLayer=YES; _dev.layer.cornerRadius=16; _dev.layer.masksToBounds=YES;
     [cv addSubview:_dev];
 
@@ -1118,31 +1165,52 @@ static void MIDIReadCB(const MIDIPacketList *pl, void *a, void *b) {
        is NOT flipped, so y grows upward). Laid out as explicit rows because the
        previous absolute values had drifted into overlaps when the window grew. */
     CGFloat px=756, pw=312, bw=(pw-6)/2;
+    /* Pin every right-pane control to the TOP-RIGHT corner.
+
+       They previously carried the default mask (NSViewNotSizable), which pins a
+       subview to the BOTTOM-LEFT of a non-flipped content view -- so growing the
+       window vertically held them at a fixed height off the bottom while the log
+       scroll view (NSViewHeightSizable, bottom-anchored) grew upward straight
+       through them: at +160 pt of height the log covered the MIDI status line,
+       the four output-test buttons, and Restart/Calibration. Horizontally the
+       log tracked the right edge while the buttons did not, so the column came
+       apart. Same corner, same behaviour, for all of them now.
+
+       The window could also be dragged narrower than the pane itself: minSize
+       was 980 but the pane ends at px+pw = 1068, clipping ~88 pt off the right.
+       The panel is now width-flexible, so a narrower window shrinks the diagram
+       instead of amputating the controls. */
+    const NSAutoresizingMaskOptions kPane = NSViewMinXMargin|NSViewMinYMargin;
     _learnBtn=[NSButton buttonWithTitle:@"Learn mode: off" target:self action:@selector(toggleLearn:)];
-    _learnBtn.frame=NSMakeRect(px,790,bw,30); _learnBtn.bezelStyle=NSBezelStyleRounded; [cv addSubview:_learnBtn];
+    _learnBtn.frame=NSMakeRect(px,790,bw,30); _learnBtn.bezelStyle=NSBezelStyleRounded;
+    _learnBtn.autoresizingMask=kPane; [cv addSubview:_learnBtn];
     NSButton *exp=[NSButton buttonWithTitle:@"Export map" target:self action:@selector(exportMap:)];
-    exp.frame=NSMakeRect(px+bw+6,790,bw,30); exp.bezelStyle=NSBezelStyleRounded; [cv addSubview:exp];
+    exp.frame=NSMakeRect(px+bw+6,790,bw,30); exp.bezelStyle=NSBezelStyleRounded;
+    exp.autoresizingMask=kPane; [cv addSubview:exp];
 
     /* Restart bridge: tears the USB session down gracefully (SIGTERM, so the
        device is left clean) and brings it straight back. startBridge also clears
        _connected, so the tester re-binds to the freshly published CoreMIDI
        source rather than holding a stale endpoint. */
     NSButton *rst=[NSButton buttonWithTitle:@"Restart bridge" target:self action:@selector(restart:)];
-    rst.frame=NSMakeRect(px,754,bw,28); rst.bezelStyle=NSBezelStyleRounded; [cv addSubview:rst];
+    rst.frame=NSMakeRect(px,754,bw,28); rst.bezelStyle=NSBezelStyleRounded;
+    rst.autoresizingMask=kPane; [cv addSubview:rst];
     NSButton *cal=[NSButton buttonWithTitle:@"Calibration…" target:self action:@selector(openCalibration:)];
-    cal.frame=NSMakeRect(px+bw+6,754,bw,28); cal.bezelStyle=NSBezelStyleRounded; [cv addSubview:cal];
+    cal.frame=NSMakeRect(px+bw+6,754,bw,28); cal.bezelStyle=NSBezelStyleRounded;
+    cal.autoresizingMask=kPane; [cv addSubview:cal];
 
     NSTextField *tl=[NSTextField labelWithString:@"Output test:"]; tl.frame=NSMakeRect(px,732,pw,16);
-    tl.font=[NSFont systemFontOfSize:10]; tl.textColor=HEX(139,147,165,1); [cv addSubview:tl];
+    tl.font=[NSFont systemFontOfSize:10]; tl.textColor=HEX(139,147,165,1);
+    tl.autoresizingMask=kPane; [cv addSubview:tl];
     NSArray *tests=@[@[@"Motor ▶",@"start"],@[@"Brake ■",@"brake"],@[@"45",@"r45"],@[@"33",@"r33"]];
     CGFloat tx=px;
     for(NSArray *t in tests){ NSButton *b=[NSButton buttonWithTitle:t[0] target:self action:@selector(testOut:)];
         b.identifier=t[1]; b.frame=NSMakeRect(tx,700,72,28); b.bezelStyle=NSBezelStyleRounded;
-        [cv addSubview:b]; tx+=76; }
+        b.autoresizingMask=kPane; [cv addSubview:b]; tx+=76; }
 
     _midiStat=[NSTextField labelWithString:@"MIDI: waiting for bridge…"];
     _midiStat.frame=NSMakeRect(px,674,pw,18); _midiStat.font=[NSFont monospacedSystemFontOfSize:11 weight:NSFontWeightMedium];
-    [cv addSubview:_midiStat]; [self updateMidiStat];
+    _midiStat.autoresizingMask=kPane; [cv addSubview:_midiStat]; [self updateMidiStat];
 
     NSScrollView *sv=[[NSScrollView alloc] initWithFrame:NSMakeRect(px,16,pw,650)];
     sv.hasVerticalScroller=YES; sv.borderType=NSLineBorder; sv.autoresizingMask=NSViewHeightSizable|NSViewMinXMargin;
@@ -1171,13 +1239,29 @@ static void MIDIReadCB(const MIDIPacketList *pl, void *a, void *b) {
     a.informativeText=@"A VirtualDJ <device> snippet of your learned controls is on the clipboard. Paste it into mappers/virtualdj/Numark_V7.xml (and docs/PROTOCOL.md).";
     [a addButtonWithTitle:@"OK"]; [a runModal];
 }
+/* Motor commands are per-deck: deck B = deck A + 0x0A (docs/CONTROL-MAP.md).
+   MEASURED there, not assumed -- with the switch on B, `B0 43 00` produces zero
+   messages and no motion while `B0 4D 00` spins the platter. Sending the deck-A
+   block unconditionally left all four of these buttons silently dead whenever
+   DECK SELECT was on B, on a panel that already tracks the live deck for input.
+
+   The RPM choice is also REMEMBERED rather than reset: "Motor" used to send
+   `45 00` (33 1/3) before every start, so pressing 45 and then Motor spun at
+   33 1/3 and the 45 button appeared to do nothing. */
 - (void)testOut:(NSButton*)b {
-    const uint8_t start[3]={0xB0,0x43,0x00}, brake[3]={0xB0,0x44,0x00}, r45[3]={0xB0,0x45,0x01}, r33[3]={0xB0,0x45,0x00};
+    uint8_t d = _dev.activeDeck ? 0x0A : 0x00;      /* motor block offset */
     NSString *k=b.identifier;
-    if([k isEqual:@"start"]){ uint8_t rpm[3]={0xB0,0x45,0x00}; [self sendBytes:rpm len:3]; [self sendBytes:start len:3]; }
+    if([k isEqual:@"r45"] || [k isEqual:@"r33"]) _testRpm = [k isEqual:@"r45"] ? 1 : 0;
+    uint8_t rpm[3]   = {0xB0, (uint8_t)(0x45+d), _testRpm};
+    uint8_t start[3] = {0xB0, (uint8_t)(0x43+d), 0x00};
+    uint8_t brake[3] = {0xB0, (uint8_t)(0x44+d), 0x00};
+    if([k isEqual:@"start"]){
+        /* PROTOCOL.md: RPM select must be issued while the platter is stopped,
+           so it goes first and start follows. */
+        [self sendBytes:rpm len:3]; [self sendBytes:start len:3];
+    }
     else if([k isEqual:@"brake"]) [self sendBytes:brake len:3];
-    else if([k isEqual:@"r45"]) [self sendBytes:r45 len:3];
-    else if([k isEqual:@"r33"]) [self sendBytes:r33 len:3];
+    else                          [self sendBytes:rpm len:3];
 }
 - (void)openCalibration:(id)s {
     (void)s;
@@ -1218,15 +1302,53 @@ static void MIDIReadCB(const MIDIPacketList *pl, void *a, void *b) {
 
 // ---- menu bar ----
 - (void)tick {
-    if(![self bridgeRunning]) [self startBridge];   // relaunch if it exited
+    /* Only chase the bridge while the deck is actually on the bus. Relaunching
+       into an empty bus spawned a process every 3 s -- ~1,200/hour -- each of which
+       printed "not found" and died. */
+    if(v7IsPluggedIn() && ![self bridgeRunning]) [self startBridge];
     if(!_connected) [self connectMIDI];
     [self refresh];
     [self logDiag];
 }
+
+/* "Is the bridge process alive" is NOT the question, and answering it was a lie
+   in both directions.
+
+   With no V7 attached, tick launches the bridge and calls refresh microseconds
+   later -- long before the child has reached libusb_open and exited with "not
+   found". isRunning is therefore ALWAYS true at the moment refresh reads it, so
+   the menu bar sat on "◉ V7 / connected" permanently with nothing plugged in,
+   repainting the same lie every 3 s. The identical shape hides a bring-up that
+   fails for any other reason: a bridge that cannot claim the interfaces exits
+   in well under a second and refresh never sees it gone.
+
+   Three real states, from two independent signals: IOKit for whether the
+   hardware is on the bus (synchronous and current -- the same call the
+   calibration gate already trusted, which this file had and did not use here),
+   and a bridge that has SURVIVED long enough to have finished its handshake. */
+#define BRIDGE_SETTLE 1.5      /* seconds a bridge must live before it counts as up */
 - (void)refresh {
-    BOOL up=[self bridgeRunning];
-    _item.button.title = up ? @"◉ V7" : @"○ V7";
-    _statusLine.title = up ? @"Numark V7 — connected" : @"Numark V7 — not found (plug it in)";
+    BOOL plugged = v7IsPluggedIn();
+    NSTimeInterval now = [NSDate timeIntervalSinceReferenceDate];
+    BOOL settled = [self bridgeRunning] && (now - _bridgeUpSince) >= BRIDGE_SETTLE;
+    if(settled) _launchCount = 0;          /* it stuck: stop counting retries */
+    BOOL up = plugged && settled;
+
+    if(!plugged){
+        _item.button.title = @"○ V7";
+        _statusLine.title  = @"Numark V7 — not found (plug it in)";
+    } else if(up){
+        _item.button.title = @"◉ V7";
+        _statusLine.title  = @"Numark V7 — connected";
+    } else if(_launchCount >= 3){
+        /* Plugged in, and the bridge will not stay up. Say so instead of
+           cycling between "connected" and "not found" forever. */
+        _item.button.title = @"◍ V7";
+        _statusLine.title  = @"Numark V7 — bring-up failing (see /tmp/openv7_bridge.log)";
+    } else {
+        _item.button.title = @"◍ V7";
+        _statusLine.title  = @"Numark V7 — connecting…";
+    }
     if(@available(macOS 13.0,*))
         _loginItem.state=(SMAppService.mainAppService.status==SMAppServiceStatusEnabled)?NSControlStateValueOn:NSControlStateValueOff;
     [self updateMidiStat];
