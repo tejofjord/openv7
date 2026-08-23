@@ -23,7 +23,7 @@ clang -O2 -std=c11 -Wall -Wno-deprecated-declarations \
 echo "==> building menu-bar app"
 clang -O2 -fobjc-arc \
   app/OpenV7App.m \
-  -framework Cocoa -framework ServiceManagement -framework CoreMIDI \
+  -framework Cocoa -framework ServiceManagement -framework CoreMIDI -framework IOKit \
   -o "$BUILD/OpenV7"
 
 echo "==> assembling app bundle"
