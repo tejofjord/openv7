@@ -41,9 +41,6 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 [ -f app/AppIcon.icns ] || ./tools/build-icon.sh
 cp app/Info.plist       "$APP/Contents/Info.plist"
 cp app/AppIcon.icns     "$APP/Contents/Resources/AppIcon.icns"
-# NOT bundled: tester/index.html is the standalone Web MIDI tester. The app's
-# tester is native AppKit and never loads it, so shipping it inside the bundle
-# was dead weight. It still works on its own -- see tester/README.md.
 cp "$BUILD/OpenV7"       "$APP/Contents/MacOS/OpenV7"
 cp "$BUILD/openv7-bridge" "$APP/Contents/MacOS/openv7-bridge"
 chmod +x "$APP/Contents/MacOS/"*
