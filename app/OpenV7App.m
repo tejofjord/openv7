@@ -10,6 +10,7 @@
 #import <Cocoa/Cocoa.h>
 #import <CoreMIDI/CoreMIDI.h>
 #import <ServiceManagement/ServiceManagement.h>
+#import <signal.h>
 
 static NSColor *HEX(int r,int g,int b,double a){ return [NSColor colorWithSRGBRed:r/255.0 green:g/255.0 blue:b/255.0 alpha:a]; }
 
@@ -141,15 +142,31 @@ static NSColor *HEX(int r,int g,int b,double a){ return [NSColor colorWithSRGBRe
             c.d0B = (dB>=0) ? (uint8_t)dB : 0xFF;
             [_controls addObject:c];
         }
-        /* Knob presses -- MEASURED on this hardware, not inferred.
+        /* Knob presses -- MEASURED on this hardware, not inferred. These are
+           separate addresses from the rotation CC, so a knob carries both.
+
            BROWSE push = note 0x08. That also settles an open question in the
            docs, which had 0x08 flagged as "not LOAD PREPARE" with its panel
-           label unidentified: it is the browse encoder's push.
-           FX SELECT push = note 0x5A (its rotation is CC 0x5B).
-           These are separate from the rotation CC, so a knob carries both. */
+           label unidentified: it is the browse encoder's push. It has no deck-B
+           address because BROWSE is a single shared control, not per-deck (the
+           CC table in docs/CONTROL-MAP.md lists 0x44 with an empty deck-B
+           column).
+
+           FX SELECT push is a DECK PAIR: 0x53 on deck A, 0x5A on deck B --
+           the `0x53 / 0x5A` row of the note table, the same shape as its
+           neighbours FX ON (0x52/0x59) and MASTER (0x54/0x5B).
+
+           This previously carried 0x5A alone, in the deck-A slot, with no deck-B
+           address at all. 0x5A is the deck-B address, so with the switch on A
+           the press emitted 90 53 xx and matched nothing: the knob turned on
+           screen but pressing it did nothing, which is exactly the failure the
+           deck-pair comment on controlForStatus warns about. Re-measured here:
+           press gave `90 53 7f` / `90 53 00` and rotation `b0 5a 7f` with the
+           switch on A -- so the old note that rotation is CC 0x5B was the
+           deck-B half of that pair too. */
         for(V7Control *c in _controls){
             if([c.cid isEqual:@"browse"]){ c.pressStatus=0x90; c.pressD0=0x08; c.pressD0B=0xFF; }
-            if([c.cid isEqual:@"fxsel"]) { c.pressStatus=0x90; c.pressD0=0x5A; c.pressD0B=0xFF; }
+            if([c.cid isEqual:@"fxsel"]) { c.pressStatus=0x90; c.pressD0=0x53; c.pressD0B=0x5A; }
             if([c.cid isEqual:@"fxmix"])  c.faderInverted=YES;   /* max at the top */
         }
         [self loadMap];
@@ -541,7 +558,10 @@ static NSColor *HEX(int r,int g,int b,double a){ return [NSColor colorWithSRGBRe
 @property (assign) MIDIPortRef inPort;
 @property (assign) MIDIPortRef outPort;    // to send to device
 @property (assign) MIDIEndpointRef dest;   // send target
+@property (assign) MIDIEndpointRef boundSrc;   // the source inPort is currently connected to
 @property (assign) BOOL connected;
+@property (assign) long lastRx;                // for "how long since the last message"
+@property (assign) NSTimeInterval lastRxAt;
 @property (strong) NSTimer *timer2;
 @property (strong) NSTextField *midiStat;
 @property (strong) id activityToken;
@@ -599,27 +619,87 @@ static void MIDIReadCB(const MIDIPacketList *pl, void *a, void *b) {
     if([self bridgeRunning]) return;
     NSString *path=[self bridgePath]; if(!path) return;
     NSTask *t=[NSTask new]; t.executableURL=[NSURL fileURLWithPath:path];
+    /* --supervised: if this app is force-quit or crashes, applicationWillTerminate
+       never runs and the bridge is orphaned while still holding both USB
+       interfaces -- after which every relaunch is refused with
+       LIBUSB_ERROR_ACCESS. The flag makes the child exit on reparenting. */
+    t.arguments = @[@"--supervised"];
     t.qualityOfService = NSQualityOfServiceUserInteractive;   /* keep the child un-throttled */
     t.standardOutput=[NSFileHandle fileHandleWithNullDevice];
-    /* keep the bridge's status lines (handshake, teardown) in a support log */
-    [[NSFileManager defaultManager] createFileAtPath:@"/tmp/openv7_bridge.log" contents:nil attributes:nil];
-    NSFileHandle *elog=[NSFileHandle fileHandleForWritingAtPath:@"/tmp/openv7_bridge.log"];
+    /* Keep the bridge's status lines (handshake, teardown) in a support log --
+       APPENDED, not truncated.
+
+       The bridge is relaunched automatically whenever it exits, and recreating
+       the file on each launch destroyed the record of WHY the previous one
+       exited. That is precisely the evidence an intermittent startup fault
+       needs, and losing it is why a bridge that had lost its USB handle went
+       undiagnosed: every relaunch wiped the disconnect message that explained
+       it. Each launch is stamped so a failure can be tied to its run.
+
+       One generation is rolled at 1 MB, so an unattended run cannot fill /tmp
+       (a spin-forever bug once wrote 2.7 MB in a day). */
+    NSString *lp=@"/tmp/openv7_bridge.log";
+    NSFileManager *fm=[NSFileManager defaultManager];
+    NSDictionary *la=[fm attributesOfItemAtPath:lp error:NULL];
+    if(la && [la fileSize] > 1024*1024){
+        [fm removeItemAtPath:[lp stringByAppendingString:@".1"] error:NULL];
+        [fm moveItemAtPath:lp toPath:[lp stringByAppendingString:@".1"] error:NULL];
+    }
+    if(![fm fileExistsAtPath:lp]) [fm createFileAtPath:lp contents:nil attributes:nil];
+    NSFileHandle *elog=[NSFileHandle fileHandleForWritingAtPath:lp];
+    [elog seekToEndOfFile];
+    [elog writeData:[[NSString stringWithFormat:@"\n===== bridge launch %@ =====\n",
+        [NSDateFormatter localizedStringFromDate:[NSDate date]
+            dateStyle:NSDateFormatterShortStyle timeStyle:NSDateFormatterMediumStyle]]
+        dataUsingEncoding:NSUTF8StringEncoding]];
     t.standardError = elog ?: [NSFileHandle fileHandleWithNullDevice];
     NSError *e=nil; if([t launchAndReturnError:&e]) _task=t;
     _connected=NO;   // reconnect the tester to the freshly-published source
     [self refresh];
 }
 /* SIGTERM (not kill) so the bridge runs its graceful USB teardown, leaving the
-   device clean for the next launch. */
-- (void)stopBridge { if([self bridgeRunning]) [_task terminate]; _task=nil; }
+   device clean for the next launch -- then WAIT for it to actually exit.
 
+   [NSTask terminate] only DELIVERS the signal; it returns immediately while the
+   child is still inside a teardown that takes ~600 ms (cancel every transfer,
+   pump the event loop 12 x 50 ms, drop to the zero-bandwidth alt setting,
+   release both interfaces). Clearing _task straight afterwards made
+   bridgeRunning report NO while the old process was still very much alive, so
+   restart: launched the replacement into that window -- where it contended with
+   the dying process for the same USB interfaces and lost with
+   LIBUSB_ERROR_BUSY, which the bridge then swallowed and reported as a clean
+   bring-up. Waiting closes the window at the source.
+
+   Bounded and force-killed on timeout: a wedged child must never hang the UI. */
+- (void)stopBridge {
+    if(![self bridgeRunning]){ _task=nil; return; }
+    NSTask *t=_task; _task=nil;
+    [t terminate];
+    NSDate *deadline=[NSDate dateWithTimeIntervalSinceNow:2.0];
+    while(t.isRunning && [deadline timeIntervalSinceNow]>0)
+        [NSThread sleepForTimeInterval:0.02];
+    if(t.isRunning){ kill(t.processIdentifier, SIGKILL); [t waitUntilExit]; }
+}
+
+/* Bind to the bridge's CoreMIDI source, re-binding whenever it is republished.
+
+   Keyed on the ENDPOINT REF, not on a _connected flag. Every bridge restart
+   disposes the old endpoint and creates a new one that happens to carry the
+   same name, so "already connected" is only true while the ref is unchanged --
+   the previous flag-only test could leave the port attached to a disposed
+   endpoint and consider the job done. Disconnecting the old ref first also
+   stops connections stacking up over a long session of restarts. */
 - (void)connectMIDI {
     if(!_client) MIDIClientCreate(CFSTR("OpenV7 Tester"), NULL, NULL, &_client);
     if(!_inPort) MIDIInputPortCreate(_client, CFSTR("in"), MIDIReadCB, NULL, &_inPort);
     if(!_outPort) MIDIOutputPortCreate(_client, CFSTR("out"), &_outPort);
     MIDIEndpointRef src=findEndpointNamed(@"Numark V7", YES);
     _dest = findEndpointNamed(@"Numark V7", NO);
-    if(src && !_connected){ MIDIPortConnectSource(_inPort, src, NULL); }
+    if(src != _boundSrc){
+        if(_boundSrc) MIDIPortDisconnectSource(_inPort, _boundSrc);
+        if(src) MIDIPortConnectSource(_inPort, src, NULL);
+        _boundSrc = src;
+    }
     _connected = (src!=0);
     [self updateMidiStat];
 }
@@ -630,11 +710,31 @@ static void MIDIReadCB(const MIDIPacketList *pl, void *a, void *b) {
     p=MIDIPacketListAdd(pl,sizeof buf,p,0,n,b);
     MIDISend(_outPort, _dest, pl);
 }
+/* Report whether MIDI is actually MOVING, not just whether an endpoint exists.
+
+   "An endpoint named Numark V7 is registered" is a proxy, and a stale one: a
+   bridge holding a dead USB handle keeps its endpoint published, which is how
+   this line read "connected" for 11 hours while nothing arrived. The age of the
+   last message is the only real signal the tester has, so show it.
+
+   It is deliberately NOT rendered as a fault: the V7 is genuinely silent when
+   idle (docs/HANDOFF-MAC.md), so a long gap means "untouched" just as often as
+   "broken". Stating the age lets the operator tell the difference by spinning
+   the platter; claiming an error here would cry wolf on every idle deck. */
 - (void)updateMidiStat {
     if(!_midiStat) return;
-    _midiStat.stringValue = [NSString stringWithFormat:@"MIDI: %@ · %ld msgs in",
-        _connected?@"connected":@"waiting for bridge…", g_rxcount];
-    _midiStat.textColor = _connected ? HEX(59,189,138,1) : HEX(217,150,58,1);
+    if(!_connected){
+        _midiStat.stringValue=@"MIDI: waiting for bridge…";
+        _midiStat.textColor=HEX(217,150,58,1);
+        return;
+    }
+    NSTimeInterval now=[NSDate timeIntervalSinceReferenceDate];
+    if(g_rxcount!=_lastRx){ _lastRx=g_rxcount; _lastRxAt=now; }
+    NSString *age = _lastRxAt ? [NSString stringWithFormat:@"last %.0fs ago", now-_lastRxAt]
+                              : @"nothing yet";
+    _midiStat.stringValue=[NSString stringWithFormat:@"MIDI: connected · %ld msgs · %@",
+        g_rxcount, age];
+    _midiStat.textColor = HEX(59,189,138,1);
 }
 
 - (void)flushRx {
@@ -786,8 +886,16 @@ static void MIDIReadCB(const MIDIPacketList *pl, void *a, void *b) {
         @"bridge=%d connected=%d rxCount=%ld testerVisible=%d inPort=%u src=%lu [%@]\n",
         [self bridgeRunning]?1:0, _connected?1:0, g_rxcount,
         _tester.isVisible?1:0, (unsigned)_inPort, (unsigned long)ns, names];
+    /* Rolled at 1 MB like the bridge log: this appends a line every 3 s forever
+       (~28,800 lines/day), so unbounded it is a slow /tmp leak. */
+    NSFileManager *gfm=[NSFileManager defaultManager];
+    NSDictionary *ga=[gfm attributesOfItemAtPath:@"/tmp/openv7_gui.log" error:NULL];
+    if(ga && [ga fileSize] > 1024*1024){
+        [gfm removeItemAtPath:@"/tmp/openv7_gui.log.1" error:NULL];
+        [gfm moveItemAtPath:@"/tmp/openv7_gui.log" toPath:@"/tmp/openv7_gui.log.1" error:NULL];
+    }
     NSFileHandle *fh=[NSFileHandle fileHandleForWritingAtPath:@"/tmp/openv7_gui.log"];
-    if(!fh){ [[NSFileManager defaultManager] createFileAtPath:@"/tmp/openv7_gui.log" contents:nil attributes:nil];
+    if(!fh){ [gfm createFileAtPath:@"/tmp/openv7_gui.log" contents:nil attributes:nil];
              fh=[NSFileHandle fileHandleForWritingAtPath:@"/tmp/openv7_gui.log"]; }
     if(fh){ [fh seekToEndOfFile]; [fh writeData:[line dataUsingEncoding:NSUTF8StringEncoding]]; [fh closeFile]; }
 }

@@ -65,6 +65,22 @@ static int g_diag    = 0;   /* --diag: print iso streaming rates once a second *
    idles well past 24 s before the first input, repeated enough to catch an
    intermittent fault. */
 static int g_keepalive = 1;
+/* --supervised: exit when the launching parent goes away.
+
+   The menu-bar app runs this as a child. If that app is force-quit or crashes,
+   its terminate handler never runs and this process is ORPHANED -- still
+   holding both USB interfaces. Every later bridge then fails to claim them
+   (macOS reports LIBUSB_ERROR_ACCESS for an interface another process owns),
+   which is one of the ways "sometimes the tester does not handshake on startup"
+   happened: observed live here, five consecutive launches refused 3 s apart
+   until the orphan died. There is no PDEATHSIG on macOS, so the child watches
+   for reparenting instead: when the parent dies the kernel reparents us to
+   launchd and getppid() changes.
+
+   Opt-in, because a bare `./openv7` from a shell is legitimately orphaned by
+   `nohup`/disown and must keep running. */
+static int   g_supervised = 0;
+static pid_t g_parent_pid = 0;
 
 /* ---- learn mode: catalog each distinct control as it's touched ---- */
 struct cat_entry { int key; uint8_t status, d0, vmin, vmax; long count; };
@@ -237,20 +253,48 @@ static void dest_read(const MIDIPacketList *pl, void *refCon, void *srcRefCon) {
 static int ctrl(uint8_t rt, uint8_t rq, uint16_t v, uint16_t ix, unsigned char *b, uint16_t l) {
     return libusb_control_transfer(g_dev, rt, rq, v, ix, b, l, 2000);
 }
+static const char *hs_err(int r) { return r < 0 ? libusb_error_name(r) : "short reply"; }
+
+/* Arm the device for streaming.
+
+   EVERY step is checked. It used to check only the firmware read and then
+   return 0 unconditionally, discarding the result of all six remaining
+   requests -- so "handshake complete, device armed" was printed whether or not
+   the device had actually been armed. Worse, a failed final status read fell
+   back to `st = 0` and armed from that FABRICATED value rather than the
+   device's real status, silently writing a wrong arm word.
+
+   That is the second half of "sometimes the tester does not handshake properly
+   on startup": when it did fail, the log claimed success, so the failure was
+   invisible and the session simply streamed nothing. Failing here instead
+   returns non-zero from main, the supervisor relaunches a few seconds later,
+   and the reason is in the log. */
 static int ploytec_handshake(void) {
     unsigned char b[16]; int r;
+
     r = ctrl(0xC0, PL_REQ_FIRMWARE, 0, 0, b, 15);
-    if (r < 3) { fprintf(stderr, "firmware read failed (%d)\n", r); return -1; }
+    if (r < 3) { fprintf(stderr, "OpenV7: firmware read failed (%s)\n", hs_err(r)); return -1; }
     fprintf(stderr, "  V7 firmware: chip 0x%02X\n", b[0]);
-    ctrl(0xC0, PL_REQ_STATUS, 0, 0, b, 1);            /* status read */
-    ctrl(0xA2, PL_REQ_GET_RATE, 0x0100, 0, b, 3);     /* GET_CUR rate */
+
+    r = ctrl(0xC0, PL_REQ_STATUS, 0, 0, b, 1);        /* status read */
+    if (r < 1) { fprintf(stderr, "OpenV7: status read failed (%s)\n", hs_err(r)); return -1; }
+
+    r = ctrl(0xA2, PL_REQ_GET_RATE, 0x0100, 0, b, 3); /* GET_CUR rate */
+    if (r < 0) { fprintf(stderr, "OpenV7: sample-rate GET_CUR failed (%s)\n", hs_err(r)); return -1; }
+
     unsigned char rate[3] = { V7_SAMPLE_RATE & 0xFF, (V7_SAMPLE_RATE >> 8) & 0xFF, (V7_SAMPLE_RATE >> 16) & 0xFF };
     uint16_t reps[] = { 0x0086, V7_EP_AUDIO_OUT, V7_EP_AUDIO_IN, 0x0005 };
-    for (unsigned i = 0; i < 4; i++) ctrl(0x22, PL_REQ_SET_RATE, 0x0100, reps[i], rate, 3);
+    for (unsigned i = 0; i < 4; i++) {
+        r = ctrl(0x22, PL_REQ_SET_RATE, 0x0100, reps[i], rate, 3);
+        if (r < 0) { fprintf(stderr, "OpenV7: sample-rate SET_CUR on 0x%02X failed (%s)\n",
+                             reps[i], hs_err(r)); return -1; }
+    }
+
     r = ctrl(0xC0, PL_REQ_STATUS, 0, 0, b, 1);        /* re-read status */
-    unsigned char st = (r > 0) ? b[0] : 0;
-    int8_t mod = (int8_t)(st | 0x20);                 /* arm: bit5 set, sign-extended */
-    ctrl(0x40, PL_REQ_STATUS, (uint16_t)(int16_t)mod, 0, NULL, 0);
+    if (r < 1) { fprintf(stderr, "OpenV7: status re-read failed (%s)\n", hs_err(r)); return -1; }
+    int8_t mod = (int8_t)(b[0] | 0x20);               /* arm: bit5 set, sign-extended */
+    r = ctrl(0x40, PL_REQ_STATUS, (uint16_t)(int16_t)mod, 0, NULL, 0);
+    if (r < 0) { fprintf(stderr, "OpenV7: arm write failed (%s)\n", hs_err(r)); return -1; }
     return 0;
 }
 /* Re-arm the control stream. The V7 has a watchdog: it silently STOPS reporting
@@ -298,23 +342,60 @@ static void ploytec_rearm(void) {
    Keeping several transfers queued means the endpoint is always armed. */
 #define CTRL_IN_NXFER 4
 static struct libusb_transfer *g_t_in[CTRL_IN_NXFER];
+
+/* A libusb error that means "this handle is dead", not "try again".
+
+   ROOT CAUSE of "the V7 shows connected but nothing ever arrives, and only a
+   restart fixes it". arm_bulk() retried EVERY submit failure forever, including
+   LIBUSB_ERROR_NO_DEVICE -- which is returned once the device has left the bus,
+   and is never transient: the handle names an enumeration that no longer
+   exists, so no amount of retrying can revive it. Unplugging the V7 therefore
+   WEDGED the bridge instead of ending it. Measured on this machine after an
+   11-hour unplug: 37,946 retry lines, 2.7 MB of log, 5m36s of CPU, with the
+   process still "running", its stale CoreMIDI endpoint still published, and the
+   menu bar still green.
+
+   Because the supervising app only relaunches the bridge when the PROCESS
+   exits, that wedged bridge was never replaced -- so on replug the device was
+   never re-opened and never re-handshaked, which is what "sometimes the tester
+   does not handshake on startup" actually was. Exiting here is the whole fix:
+   the supervisor sees the exit, relaunches, and the fresh process runs the full
+   handshake against the new enumeration. */
+static int usb_gone(int err) {
+    return err == LIBUSB_ERROR_NO_DEVICE || err == LIBUSB_ERROR_NOT_FOUND;
+}
+static void usb_lost(int err, const char *name) {
+    fprintf(stderr, "OpenV7: device disconnected (%s on %s) — exiting so it is "
+                    "re-opened and re-handshaked on replug.\n", libusb_error_name(err), name);
+    g_quit = 1;
+}
+
 static struct libusb_transfer *g_t_aux = NULL;
 static int g_in_live[CTRL_IN_NXFER];
 static int g_aux_live = 0;
 static long g_ctrl_bytes = 0;          /* control-IN traffic, for --diag */
 static void arm_bulk(struct libusb_transfer *t, int *live, unsigned char ep, const char *name);
 
+/* iso rings, kept addressable so the main loop can re-arm them (see arm_iso) */
+static struct libusb_transfer *g_iso_out[ISO_NXFER], *g_iso_in[ISO_NXFER];
+static int g_iso_out_live[ISO_NXFER], g_iso_in_live[ISO_NXFER];
+static void arm_iso(struct libusb_transfer *t, int *live, int pace, const char *name);
+
 /* ---- streaming-health counters (for the --diag rate report) ---- */
 static long g_isoout_cmpl = 0, g_isoin_cmpl = 0;
 
 /* ---- USB transfer callbacks ---- */
 static void LIBUSB_CALL iso_cb(struct libusb_transfer *t) {
-    if (t->status == LIBUSB_TRANSFER_NO_DEVICE) { g_quit = 1; return; }  /* unplugged */
+    int idx = (int)(intptr_t)t->user_data;
+    g_iso_out_live[idx] = 0;                                   /* no longer in flight */
+    if (t->status == LIBUSB_TRANSFER_NO_DEVICE) { usb_lost(LIBUSB_ERROR_NO_DEVICE, "iso-out"); return; }
     g_isoout_cmpl++;
     /* Re-pace before every resubmit: the packet lengths are what hold 44.1 kHz,
        and the accumulator has to keep advancing across resubmissions or the
-       fractional 0.0125 frame/packet is lost and the stream drifts slow. */
-    if (!g_quit) { iso_pace(t); libusb_submit_transfer(t); }   /* silence buffer already zero */
+       fractional 0.0125 frame/packet is lost and the stream drifts slow.
+       arm_iso does the pacing and, unlike the bare submit this replaces, CHECKS
+       the result -- the silence buffer is already zero, only lengths move. */
+    arm_iso(t, &g_iso_out_live[idx], 1, "iso-out");
 }
 static void LIBUSB_CALL drain_cb(struct libusb_transfer *t) {
     g_aux_live = 0;
@@ -323,9 +404,11 @@ static void LIBUSB_CALL drain_cb(struct libusb_transfer *t) {
     if (!g_quit) arm_bulk(t, &g_aux_live, V7_EP_AUX_IN, "aux-drain");  /* discard audio-return */
 }
 static void LIBUSB_CALL isoin_cb(struct libusb_transfer *t) {
-    if (t->status == LIBUSB_TRANSFER_NO_DEVICE) { g_quit = 1; return; }
+    int idx = (int)(intptr_t)t->user_data;
+    g_iso_in_live[idx] = 0;
+    if (t->status == LIBUSB_TRANSFER_NO_DEVICE) { usb_lost(LIBUSB_ERROR_NO_DEVICE, "iso-in"); return; }
     g_isoin_cmpl++;
-    if (!g_quit) libusb_submit_transfer(t);           /* drain iso-IN — REQUIRED or the
+    arm_iso(t, &g_iso_in_live[idx], 0, "iso-in");     /* drain iso-IN — REQUIRED or the
                                                          device stalls its control stream */
 }
 static void LIBUSB_CALL out_cb(struct libusb_transfer *t) {
@@ -373,8 +456,36 @@ static void arm_bulk(struct libusb_transfer *t, int *live, unsigned char ep, con
     if (g_quit || !t || *live) return;
     int r = libusb_submit_transfer(t);
     if (r == 0) { *live = 1; return; }
+    if (usb_gone(r)) { usb_lost(r, name); return; }   /* dead handle: exit, do not spin */
     if (r == LIBUSB_ERROR_PIPE) libusb_clear_halt(g_dev, ep);
     static time_t last_gripe;           /* don't spam the log on a persistent fault */
+    time_t now = time(NULL);
+    if (now != last_gripe) {
+        fprintf(stderr, "OpenV7: %s submit failed (%s) — retrying\n", name, libusb_error_name(r));
+        last_gripe = now;
+    }
+}
+
+/* Re-arm one isochronous transfer. This is arm_bulk's twin, and it exists
+   because the iso ring had the EXACT defect arm_bulk was written to fix and
+   never got the fix: both iso callbacks resubmitted with the return value
+   DISCARDED. A submit that fails drops that transfer out of the ring
+   permanently and nothing notices -- there is no completion callback for a
+   transfer that was never submitted. Lose all 16 and the 44.1 kHz playback
+   clock stops, which silences the control surface too (the chip only reports
+   controls while that clock runs), while the bridge goes on logging "running"
+   because the bulk pipes are still armed. That is the same "healthy from the
+   outside, dead on the wire" shape as the bulk bug.
+
+   Checking the result and re-arming from the main loop makes the ring
+   self-healing instead of silently draining. */
+static void arm_iso(struct libusb_transfer *t, int *live, int pace, const char *name) {
+    if (g_quit || !t || *live) return;
+    if (pace) iso_pace(t);              /* lengths carry the rate; re-pace every submit */
+    int r = libusb_submit_transfer(t);
+    if (r == 0) { *live = 1; return; }
+    if (usb_gone(r)) { usb_lost(r, name); return; }
+    static time_t last_gripe;
     time_t now = time(NULL);
     if (now != last_gripe) {
         fprintf(stderr, "OpenV7: %s submit failed (%s) — retrying\n", name, libusb_error_name(r));
@@ -399,6 +510,7 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--learn")) g_learn = 1;
         else if (!strcmp(argv[i], "--diag")) g_diag = 1;
         else if (!strcmp(argv[i], "--no-keepalive")) g_keepalive = 0;
+        else if (!strcmp(argv[i], "--supervised")) g_supervised = 1;
         else if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help")) {
             printf("OpenV7 — Numark V7 userspace driver\n"
                    "usage: openv7 [-v|--verbose] [--learn] [--diag]\n"
@@ -409,7 +521,11 @@ int main(int argc, char **argv) {
                    "            disable the control-stream keepalives (25 ms 0xFD frame on bulk\n"
                    "            0x04 + 2 s EP0 re-arm). They are ON by default: without them the\n"
                    "            control stream has been seen to deliver nothing at all from\n"
-                   "            launch. Only for A/B testing that fault.\n");
+                   "            launch. Only for A/B testing that fault.\n"
+                   "  --supervised\n"
+                   "            exit when the launching parent process goes away, instead of\n"
+                   "            lingering as an orphan that holds the USB interfaces and blocks\n"
+                   "            every later bridge from claiming them. Used by OpenV7.app.\n");
             return 0;
         }
     }
@@ -418,6 +534,7 @@ int main(int argc, char **argv) {
 
     signal(SIGINT, on_sigint);
     signal(SIGTERM, on_sigint);
+    g_parent_pid = getppid();
 
     /* Clear any inherited background/throttled scheduling. A menu-bar app's
        child can inherit a throttled task policy; keeping this process at normal
@@ -444,9 +561,27 @@ int main(int argc, char **argv) {
        release interfaces) below. */
     libusb_set_auto_detach_kernel_driver(g_dev, 1);
     libusb_set_configuration(g_dev, 1);
+    /* Check the claim and the alt setting. Both results used to be discarded and
+       "device claimed." printed regardless. Claiming is what makes the endpoints
+       usable and alt 1 is where the iso endpoints live, so a swallowed failure
+       here produced a process that logged a clean bring-up and then streamed
+       nothing at all -- the other face of "sometimes it doesn't handshake on
+       startup". LIBUSB_ERROR_BUSY specifically means another process still holds
+       the interface, in practice a previous bridge that has not finished tearing
+       down; exiting lets the supervisor retry once it has let go. */
     for (int i = 0; i < V7_NUM_INTERFACES; i++) {
-        libusb_claim_interface(g_dev, i);
-        libusb_set_interface_alt_setting(g_dev, i, V7_ALT_SETTING);
+        int r = libusb_claim_interface(g_dev, i);
+        if (r != 0) {
+            fprintf(stderr, "OpenV7: cannot claim interface %d (%s)%s\n", i, libusb_error_name(r),
+                    r == LIBUSB_ERROR_BUSY ? " — a previous bridge is still shutting down" : "");
+            return 4;
+        }
+        r = libusb_set_interface_alt_setting(g_dev, i, V7_ALT_SETTING);
+        if (r != 0) {
+            fprintf(stderr, "OpenV7: cannot select alt setting %d on interface %d (%s)\n",
+                    V7_ALT_SETTING, i, libusb_error_name(r));
+            return 4;
+        }
     }
     fprintf(stderr, "OpenV7: device claimed.\n");
     if (ploytec_handshake() != 0) return 3;
@@ -459,29 +594,28 @@ int main(int argc, char **argv) {
     fprintf(stderr, "OpenV7: CoreMIDI device \"Numark V7\" is live.\n");
 
     /* iso-OUT audio clock (silence) */
-    struct libusb_transfer *iso[ISO_NXFER];
     for (int i = 0; i < ISO_NXFER; i++) {
         /* Allocate for the WORST case (all 72 B packets) and never touch the
            bytes again — silence is zeros, and iso_pace() only moves the lengths.
            NOT V7_ISO_PKT_SIZE (156): that is the endpoint ceiling, not the
            amount the device is fed. */
         unsigned char *b = calloc(1, V7_ISO_PKT_MAX * ISO_NPKT_OUT);
-        iso[i] = libusb_alloc_transfer(ISO_NPKT_OUT);
-        libusb_fill_iso_transfer(iso[i], g_dev, V7_EP_AUDIO_OUT, b,
-                                 V7_ISO_PKT_MAX * ISO_NPKT_OUT, ISO_NPKT_OUT, iso_cb, NULL, 1000);
-        iso_pace(iso[i]);                              /* sets per-packet lengths + t->length */
-        libusb_submit_transfer(iso[i]);
+        g_iso_out[i] = libusb_alloc_transfer(ISO_NPKT_OUT);
+        libusb_fill_iso_transfer(g_iso_out[i], g_dev, V7_EP_AUDIO_OUT, b,
+                                 V7_ISO_PKT_MAX * ISO_NPKT_OUT, ISO_NPKT_OUT, iso_cb,
+                                 (void *)(intptr_t)i, 1000);
+        arm_iso(g_iso_out[i], &g_iso_out_live[i], 1, "iso-out");   /* paces, then submits checked */
     }
     /* iso-IN: the device stalls its control stream unless this endpoint is
        actively drained — the fix for "controls only report at startup". */
-    struct libusb_transfer *isoin[ISO_NXFER];
     for (int i = 0; i < ISO_NXFER; i++) {
         unsigned char *b = calloc(1, V7_ISO_IN_PKT_SIZE * ISO_NPKT_IN);
-        isoin[i] = libusb_alloc_transfer(ISO_NPKT_IN);
-        libusb_fill_iso_transfer(isoin[i], g_dev, V7_EP_AUDIO_IN, b,
-                                 V7_ISO_IN_PKT_SIZE * ISO_NPKT_IN, ISO_NPKT_IN, isoin_cb, NULL, 1000);
-        libusb_set_iso_packet_lengths(isoin[i], V7_ISO_IN_PKT_SIZE);
-        libusb_submit_transfer(isoin[i]);
+        g_iso_in[i] = libusb_alloc_transfer(ISO_NPKT_IN);
+        libusb_fill_iso_transfer(g_iso_in[i], g_dev, V7_EP_AUDIO_IN, b,
+                                 V7_ISO_IN_PKT_SIZE * ISO_NPKT_IN, ISO_NPKT_IN, isoin_cb,
+                                 (void *)(intptr_t)i, 1000);
+        libusb_set_iso_packet_lengths(g_iso_in[i], V7_ISO_IN_PKT_SIZE);
+        arm_iso(g_iso_in[i], &g_iso_in_live[i], 0, "iso-in");
     }
     /* control-IN ring + audio-return drain */
     static unsigned char aux[512];
@@ -511,6 +645,12 @@ int main(int argc, char **argv) {
         /* EP0 status re-arm, every 2 s (secondary keepalive) — legacy only. */
         if (g_keepalive) { time_t now = time(NULL);
           if (now - rearm_t >= 2) { ploytec_rearm(); rearm_t = now; } }
+        /* Orphan check: the parent died and we were reparented. Release the USB
+           interfaces via the normal teardown rather than sitting on them. */
+        if (g_supervised && getppid() != g_parent_pid) {
+            fprintf(stderr, "OpenV7: supervising parent exited — shutting down.\n");
+            g_quit = 1;
+        }
         /* Watchdog: re-arm either bulk-IN pipe if it is not in flight. Without
            this a single failed submit silently kills the control stream for the
            whole session -- the fault that presented as "the GUI registers
@@ -518,6 +658,14 @@ int main(int argc, char **argv) {
         for (int i = 0; i < CTRL_IN_NXFER; i++)
             arm_bulk(g_t_in[i], &g_in_live[i], V7_EP_CTRL_IN, "control-IN");
         arm_bulk(g_t_aux, &g_aux_live, V7_EP_AUX_IN,  "aux-drain");
+        /* Same watchdog for the iso rings. A transfer whose resubmit failed is
+           gone from the ring with no callback to notice; without this the ring
+           drains silently and takes the control stream with it. No-op when all
+           32 are in flight, which is the normal case. */
+        for (int i = 0; i < ISO_NXFER; i++) {
+            arm_iso(g_iso_out[i], &g_iso_out_live[i], 1, "iso-out");
+            arm_iso(g_iso_in[i],  &g_iso_in_live[i],  0, "iso-in");
+        }
         /* drain outgoing MIDI to the device */
         int sent_real = 0;
         pthread_mutex_lock(&outq_mtx);
@@ -550,9 +698,12 @@ int main(int argc, char **argv) {
         if (g_diag) {
             time_t now = time(NULL);
             if (now != diag_t) {
-                fprintf(stderr, "  [diag] iso-out/s=%ld iso-in/s=%ld  ctrl-bytes=%ld in-armed=%d/%d  (healthy: ~200/~62)\n",
+                int iso_armed = 0;
+                for (int i = 0; i < ISO_NXFER; i++) iso_armed += g_iso_out_live[i] + g_iso_in_live[i];
+                fprintf(stderr, "  [diag] iso-out/s=%ld iso-in/s=%ld  ctrl-bytes=%ld in-armed=%d/%d iso-armed=%d/%d  (healthy: ~200/~62)\n",
                         g_isoout_cmpl - diag_o0, g_isoin_cmpl - diag_i0, g_ctrl_bytes,
-                        g_in_live[0]+g_in_live[1]+g_in_live[2]+g_in_live[3], CTRL_IN_NXFER);
+                        g_in_live[0]+g_in_live[1]+g_in_live[2]+g_in_live[3], CTRL_IN_NXFER,
+                        iso_armed, ISO_NXFER * 2);
                 diag_o0 = g_isoout_cmpl; diag_i0 = g_isoin_cmpl; diag_t = now;
             }
         }
@@ -566,7 +717,7 @@ int main(int argc, char **argv) {
        stream to the zero-bandwidth alt setting, and release the interfaces.
        Skipping this leaves the device mid-stream and can jam the control stream
        on the next launch. */
-    for (int i = 0; i < ISO_NXFER; i++) { libusb_cancel_transfer(iso[i]); libusb_cancel_transfer(isoin[i]); }
+    for (int i = 0; i < ISO_NXFER; i++) { libusb_cancel_transfer(g_iso_out[i]); libusb_cancel_transfer(g_iso_in[i]); }
     for (int i = 0; i < CTRL_IN_NXFER; i++) libusb_cancel_transfer(g_t_in[i]);
     libusb_cancel_transfer(t_aux);
     for (int i = 0; i < 12; i++) { struct timeval tv = { 0, 50000 }; libusb_handle_events_timeout(g_ctx, &tv); }

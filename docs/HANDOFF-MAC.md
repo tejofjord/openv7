@@ -11,6 +11,80 @@ full detail. This file is the short version plus what to do next.
 
 ---
 
+## 0. ✅ FIXED — unplug/replug, and the four ways bring-up failed silently
+
+**Reported as:** "sometimes the tester does not handshake properly on startup"
+and "no GUI updates as the platter spins and buttons are pressed". Both were the
+same fault wearing two hats, and it is now fixed and verified on hardware.
+
+**What actually happened.** `arm_bulk()` retried *every* submit failure forever,
+including `LIBUSB_ERROR_NO_DEVICE`. That error is not transient — it means the
+handle names an enumeration that no longer exists — so unplugging the V7 wedged
+the bridge instead of ending it. Caught live on this machine after an 11-hour
+unplug:
+
+```
+OpenV7: handshake complete, device armed.        <- clean bring-up
+OpenV7: control-IN submit failed (LIBUSB_ERROR_PIPE) — retrying      x4
+OpenV7: control-IN submit failed (LIBUSB_ERROR_NO_DEVICE) — retrying x37,946
+```
+
+37,946 retry lines, 2.7 MB of log, 5m36s of CPU — and the process still
+"running". Because the app only relaunches the bridge when the **process**
+exits, that wedged bridge was never replaced, so on replug the device was never
+re-opened and never re-handshaked. Meanwhile the menu bar stayed green
+(`_task.isRunning`) and the tester said "connected" (an endpoint named
+`Numark V7` was still published), with `rxCount` frozen. Every health signal was
+a proxy; none of them asked whether data was moving.
+
+**Four independent defects, all of which present as "it didn't handshake".**
+
+| # | Defect | Why it was invisible |
+|---|---|---|
+| 1 | `NO_DEVICE` retried forever in `arm_bulk()` | process stays alive, so the supervisor never restarts it |
+| 2 | iso resubmits discarded their return value | a failed submit drops that transfer from the ring with no callback to notice; drain all 16 and the 44.1 kHz clock stops, silencing the control surface while the bulk pipes still look armed |
+| 3 | `ploytec_handshake()` returned 0 unconditionally | six of seven requests had their result discarded, and a failed final status read armed from a fabricated `st = 0` |
+| 4 | `libusb_claim_interface()` result discarded | printed "device claimed." even on `ERROR_BUSY`/`ERROR_ACCESS` |
+
+Defect 2 is notable: it is the *exact* bug that was found and fixed on the bulk
+pipes, and the iso ring never got the same treatment. Both rings now share the
+same shape — a live flag, a checked submit, and a main-loop watchdog that
+re-arms anything not in flight.
+
+**Two supporting races, both observed:**
+
+- `stopBridge` called `[NSTask terminate]` and cleared `_task` immediately, but
+  terminate only *delivers* the signal. The old bridge was still inside its
+  ~600 ms graceful teardown while `restart:` launched the replacement into that
+  window, where it lost the interface claim. It now waits for the exit
+  (2 s cap, then SIGKILL).
+- Force-quitting or crashing the app orphaned the bridge, which kept both USB
+  interfaces claimed; every later launch was then refused with
+  `LIBUSB_ERROR_ACCESS`. Reproduced here — five consecutive launches refused
+  3 s apart until the orphan died. macOS has no `PDEATHSIG`, so the bridge takes
+  `--supervised` (passed by the app) and exits when `getppid()` changes.
+
+**Hardware verification — re-run this after touching any of it.**
+
+1. `open build/OpenV7.app`, then `cat /tmp/openv7_bridge.log` — expect a clean
+   `device claimed` / `chip 0x33` / `device armed`.
+2. Power the V7 **off**. Within ~2 s `pgrep -f openv7-bridge` must return
+   nothing: the bridge has to *exit*, not spin. Anything else is defect 1 back.
+3. Power it **on**. Within ~8 s a new bridge appears with a full fresh
+   handshake. Measured here: off at t=12 s, on at t=18 s, armed at t=20 s.
+4. Spin the platter and watch `rxCount` climb in `/tmp/openv7_gui.log`.
+   Measured: 3,091 → 13,824 over 40 s of handling.
+5. `./openv7 --diag` should hold `iso-out/s=200 iso-in/s=62 in-armed=4/4
+   iso-armed=32/32`. **`iso-armed` is new** and is the counter that would have
+   made defect 2 visible — if it drifts below 32/32, the ring is draining.
+
+The bridge log is now **appended** rather than truncated per launch, and each
+launch is stamped, because the automatic relaunch used to erase the record of
+why the previous one died. One generation is rolled at 1 MB. That change paid
+for itself immediately: it is what exposed the orphan/`ERROR_ACCESS` race above.
+
+---
+
 ## 1. ✅ DONE — isochronous pacing fixed and measured on hardware
 
 > **Status: implemented in `src/main.c` (`iso_pace()`) and verified on the real
