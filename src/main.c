@@ -234,7 +234,7 @@ static int midi_feed(struct midi_split *s, uint8_t x, uint8_t out[3]) {
         if (x == 0xF7) { s->insysex = 0; s->status = 0; return 0; }
         s->insysex = 0;
         s->need = midi_msg_len(x);
-        if (s->need == 1) { s->status = 0; out[0] = x; return 1; }
+        if (s->need == 1) { s->status = 0; out[0] = x; out[1] = out[2] = 0; return 1; }
         s->status = x; s->ndata = 0;
         return 0;
     }
@@ -364,29 +364,33 @@ static void ploytec_rearm(void) {
     if (libusb_submit_transfer(rt) != 0) { free(rb); libusb_free_transfer(rt); }
 }
 
-/* Clear a stalled endpoint WITHOUT blocking.
+/* Clear a stalled endpoint without blocking the event thread.
 
-   libusb_clear_halt() is synchronous, and every place this replaces called it
-   from inside a transfer callback -- i.e. on the thread that is currently
-   running libusb_handle_events. That is the exact hazard the ploytec_rearm
-   comment above describes: a synchronous transfer there runs its own nested
-   event loop and stops servicing the iso ring while it waits. Stalls are rare,
-   so this never showed up in testing, but the one moment it fires is a moment
-   the stream is already unhealthy -- the worst possible time to stall the
-   pump that keeps the 44.1 kHz clock alive.
+   All three call sites for this run from inside a transfer callback -- i.e. on
+   the thread currently executing libusb_handle_events. Calling the SYNCHRONOUS
+   libusb_clear_halt() there is the hazard the ploytec_rearm comment above
+   describes: a synchronous transfer runs its own nested event loop and stops
+   servicing the iso ring while it waits. Stalls are rare, so this never
+   surfaced, but the one moment it fires is a moment the stream is already
+   unhealthy -- the worst possible time to stall the pump holding up the
+   44.1 kHz clock.
 
-   The wire request is identical: USB 2.0 section 9.4.1,
-   CLEAR_FEATURE(ENDPOINT_HALT) addressed to the endpoint. Only the delivery
-   changes, from blocking to queued. */
-static void clear_halt_async(unsigned char ep) {
-    unsigned char *b = malloc(LIBUSB_CONTROL_SETUP_SIZE);
-    if (!b) return;
-    libusb_fill_control_setup(b, LIBUSB_ENDPOINT_OUT | LIBUSB_RECIPIENT_ENDPOINT,
-                              LIBUSB_REQUEST_CLEAR_FEATURE, 0 /* ENDPOINT_HALT */, ep, 0);
-    struct libusb_transfer *t = libusb_alloc_transfer(0);
-    if (!t) { free(b); return; }
-    libusb_fill_control_transfer(t, g_dev, b, ka_write_cb, NULL, 500);
-    if (libusb_submit_transfer(t) != 0) { free(b); libusb_free_transfer(t); }
+   The fix is to DEFER the same call, not to replace it. An async
+   CLEAR_FEATURE(ENDPOINT_HALT) control transfer looks equivalent and is not:
+   on macOS libusb_clear_halt goes to ClearPipeStallBothEnds(), which clears the
+   HOST side of the pipe and resets the data toggle as well as sending the
+   request to the device. Sending only the device half leaves the host pipe
+   stalled, so every following transfer fails LIBUSB_ERROR_PIPE and the retry
+   path spins -- worse than the blocking call it was meant to improve on.
+
+   So: callbacks queue an endpoint here, and the main loop drains the queue
+   between handle_events calls, where blocking is harmless. */
+#define CLEAR_MAX 8
+static unsigned char g_clear_q[CLEAR_MAX];
+static int g_nclear = 0;
+static void clear_halt_later(unsigned char ep) {
+    for (int i = 0; i < g_nclear; i++) if (g_clear_q[i] == ep) return;   /* already queued */
+    if (g_nclear < CLEAR_MAX) g_clear_q[g_nclear++] = ep;
 }
 
 /* bulk-IN watchdog state (definition of arm_bulk is further down)
@@ -428,6 +432,18 @@ static void usb_lost(int err, const char *name) {
     g_quit = 1;
 }
 
+/* Runs on the main loop, never in a callback -- see clear_halt_later. */
+static void clear_halt_drain(void) {
+    for (int i = 0; i < g_nclear; i++) {
+        int r = libusb_clear_halt(g_dev, g_clear_q[i]);
+        if (r == 0) continue;
+        if (usb_gone(r)) { usb_lost(r, "clear-halt"); break; }
+        fprintf(stderr, "OpenV7: clear-halt on 0x%02X failed (%s)\n",
+                g_clear_q[i], libusb_error_name(r));
+    }
+    g_nclear = 0;
+}
+
 static struct libusb_transfer *g_t_aux = NULL;
 static int g_in_live[CTRL_IN_NXFER];
 static int g_aux_live = 0;
@@ -465,7 +481,7 @@ static void LIBUSB_CALL iso_cb(struct libusb_transfer *t) {
 static void LIBUSB_CALL drain_cb(struct libusb_transfer *t) {
     g_aux_live = 0;
     if (t->status == LIBUSB_TRANSFER_NO_DEVICE) { g_quit = 1; return; }
-    if (t->status == LIBUSB_TRANSFER_STALL) clear_halt_async(V7_EP_AUX_IN);
+    if (t->status == LIBUSB_TRANSFER_STALL) clear_halt_later(V7_EP_AUX_IN);
     if (!g_quit) arm_bulk(t, &g_aux_live, V7_EP_AUX_IN, "aux-drain", &g_gripe_aux);  /* discard audio-return */
 }
 static void LIBUSB_CALL isoin_cb(struct libusb_transfer *t) {
@@ -501,7 +517,7 @@ static void LIBUSB_CALL ctrl_in_cb(struct libusb_transfer *t) {
         }
     }
     if (t->status == LIBUSB_TRANSFER_NO_DEVICE) { g_quit = 1; return; }
-    if (t->status == LIBUSB_TRANSFER_STALL) clear_halt_async(V7_EP_CTRL_IN);
+    if (t->status == LIBUSB_TRANSFER_STALL) clear_halt_later(V7_EP_CTRL_IN);
     if (!g_quit) arm_bulk(t, &g_in_live[idx], V7_EP_CTRL_IN, "control-IN", &g_gripe_ctrl_in);
 }
 
@@ -523,7 +539,7 @@ static void arm_bulk(struct libusb_transfer *t, int *live, unsigned char ep,
     int r = libusb_submit_transfer(t);
     if (r == 0) { *live = 1; return; }
     if (usb_gone(r)) { usb_lost(r, name); return; }   /* dead handle: exit, do not spin */
-    if (r == LIBUSB_ERROR_PIPE) clear_halt_async(ep);
+    if (r == LIBUSB_ERROR_PIPE) clear_halt_later(ep);
     time_t now = time(NULL);            /* don't spam the log on a persistent fault */
     if (now != *gripe) {
         fprintf(stderr, "OpenV7: %s submit failed (%s) — retrying\n", name, libusb_error_name(r));
@@ -716,6 +732,7 @@ int main(int argc, char **argv) {
     while (!g_quit) {
         struct timeval tv = { 0, 20000 };
         libusb_handle_events_timeout(g_ctx, &tv);
+        clear_halt_drain();     /* stall recovery, deferred out of the callbacks */
         /* EP0 status re-arm, every 2 s (secondary keepalive) — legacy only. */
         if (g_keepalive) { time_t now = time(NULL);
           if (now - rearm_t >= 2) { ploytec_rearm(); rearm_t = now; } }
