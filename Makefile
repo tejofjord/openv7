@@ -35,10 +35,20 @@ LDFLAGS  += $(shell pkg-config --libs libusb-1.0)
 LDFLAGS  += -framework CoreMIDI -framework CoreFoundation -framework Foundation
 
 .PHONY: all clean install uninstall app test
+
+# Delete a target whose recipe failed. Without this, a binary rejected by the
+# stamp check stays on disk newer than its sources, so the very next `make
+# install` would consider it up to date and install the build we just refused.
+.DELETE_ON_ERROR:
+
 all: $(BIN)
 
 $(BIN): $(SRC) src/ploytec.h
 	$(CC) $(CFLAGS) $(SRC) -o $(BIN) $(LDFLAGS)
+	@# Check the ARTIFACT, not the inputs. SDKROOT can arrive from the environment
+	@# (xcrun exports one) or from a command-line `make SDKROOT=...`, which outranks
+	@# anything assigned here -- so validating the variable is not enough.
+	@./tools/check-stamps.sh $(BIN) $(MACOS_MIN)
 
 build:
 	mkdir -p build

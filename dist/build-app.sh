@@ -99,22 +99,7 @@ otool -L "$APP/Contents/MacOS/openv7-bridge" | sed 's/^/    /'
 
 echo "==> verifying the recorded versions (BOTH gate launch, so check both):"
 for bin in OpenV7 openv7-bridge; do
-  build="$(vtool -show-build "$APP/Contents/MacOS/$bin")"
-  got_min="$(printf '%s\n' "$build" | awk '/^ *minos /{print $2; exit}')"
-  got_sdk="$(printf '%s\n' "$build" | awk '/^ *sdk /{print $2; exit}')"
-  printf '    %-16s minos %-8s sdk %s\n' "$bin" "$got_min" "$got_sdk"
-
-  # Floor: what LaunchServices promises in Info.plist must be what dyld enforces.
-  [ "$got_min" = "$MACOS_MIN" ] ||
-    { echo "ERROR: $bin minos $got_min != $MACOS_MIN from Info.plist"; exit 1; }
-
-  # Ceiling: a stamp from an unreleased major OS makes the app unlaunchable
-  # everywhere except the build machine. This is the check that was missing.
-  [ "${got_sdk%%.*}" -le "$MACOS_SDK_MAX" ] ||
-    { echo "ERROR: $bin is stamped sdk $got_sdk, from a macOS major newer than $MACOS_SDK_MAX."
-      echo "       Such a build fails to launch on every Mac that is not running that seed,"
-      echo "       with \"You can't use this version of the application with this version of macOS\"."
-      exit 1; }
+  ./tools/check-stamps.sh "$APP/Contents/MacOS/$bin" "$MACOS_MIN"
 done
 
 echo "==> building DMG"
