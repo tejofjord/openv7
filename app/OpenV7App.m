@@ -998,7 +998,12 @@ static void MIDIReadCB(const MIDIPacketList *pl, void *a, void *b) {
         dataUsingEncoding:NSUTF8StringEncoding]];
     t.standardError = elog ?: [NSFileHandle fileHandleWithNullDevice];
     NSError *e=nil;
-    if([t launchAndReturnError:&e]){ _task=t; _bridgeUpSince=[NSDate timeIntervalSinceReferenceDate]; _launchCount++; }
+    /* Counts the ATTEMPT, not the successful spawn. If launchAndReturnError
+       fails outright -- a missing or non-executable helper, the one failure
+       that can never fix itself -- the counter would otherwise never move and
+       the status would sit on "connecting…" forever. */
+    _launchCount++;
+    if([t launchAndReturnError:&e]){ _task=t; _bridgeUpSince=[NSDate timeIntervalSinceReferenceDate]; }
     else { NSLog(@"OpenV7: could not launch the bridge: %@", e); }
     _connected=NO;   // reconnect the tester to the freshly-published source
     [self refresh];
@@ -1367,7 +1372,13 @@ static void MIDIReadCB(const MIDIPacketList *pl, void *a, void *b) {
         if(svc.status==SMAppServiceStatusEnabled)[svc unregisterAndReturnError:&e]; else [svc registerAndReturnError:&e]; }
     [self refresh];
 }
-- (void)restart:(id)s { (void)s; [self stopBridge]; [self startBridge]; }
+/* An explicit restart is a FRESH start, so the retry history goes with it:
+   without this, restarting after three failed launches immediately repainted
+   "bring-up failing" over the attempt the operator had just asked for, before
+   it had a chance to succeed. Automatic relaunches from tick keep counting --
+   distinguishing "the user is trying again" from "this keeps dying on its own"
+   is the whole point of the counter. */
+- (void)restart:(id)s { (void)s; _launchCount=0; [self stopBridge]; [self startBridge]; }
 - (void)quit:(id)s { (void)s; [self stopBridge]; [NSApp terminate:nil]; }
 
 - (void)applicationDidFinishLaunching:(NSNotification*)n {
