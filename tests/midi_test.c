@@ -74,6 +74,27 @@ int main(void) {
     { uint8_t i[]={0xF3,0x04,0x05}, w[]={0xF3,0x04};
       expect("no running status after sys-common", i,3, w,2); }
 
+    puts("  -- real 42-byte inbound frames (docs/PROTOCOL.md) --");
+    /* The frame the platter actually puts on the wire, twice in a row:
+         B0 00 7E | E0 71 75 | FD x35 | 00
+       Two MIDI messages, 35 bytes of 0xFD filler, then a 0x00 TERMINATOR.
+       Positions step 7E -> 00 between frames (+2 counts/ms at 33 1/3 RPM).
+
+       The terminator matters: midi_feed skips only 0xFD and bytes >= 0xF8, so
+       0x00 reaches the data-byte path and is absorbed as the first data byte of
+       a running-status message. This asserts the absorption is harmless here --
+       exactly four messages out, none fabricated, none shifted. */
+    { uint8_t i[84], w[] = {0xB0,0x00,0x7E, 0xE0,0x71,0x75,
+                            0xB0,0x00,0x00, 0xE0,0x1C,0x75};
+      int k = 0;
+      i[k++]=0xB0; i[k++]=0x00; i[k++]=0x7E; i[k++]=0xE0; i[k++]=0x71; i[k++]=0x75;
+      for (int j = 0; j < 35; j++) i[k++] = 0xFD;
+      i[k++]=0x00;
+      i[k++]=0xB0; i[k++]=0x00; i[k++]=0x00; i[k++]=0xE0; i[k++]=0x1C; i[k++]=0x75;
+      for (int j = 0; j < 35; j++) i[k++] = 0xFD;
+      i[k++]=0x00;
+      expect("two platter frames -> 4 messages", i,k, w,12); }
+
     printf(fails ? "\n%d FAILED\n" : "\nall passed\n", fails);
     return fails != 0;
 }
