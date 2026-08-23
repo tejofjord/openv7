@@ -64,8 +64,12 @@ hardware (✅) or mapped from a corroborating source and flagged as unconfirmed
 
 1. Download **OpenV7.dmg** from the [Releases](../../releases) page.
 2. Open it and drag **OpenV7** into **Applications**.
-3. Double-click **OpenV7**. First launch only: right-click it ▸ **Open** ▸ **Open**
-   (the build isn't notarized, so Gatekeeper asks once).
+3. Double-click **OpenV7**. The build isn't notarized, so macOS blocks the first
+   launch. Approve it once in **System Settings** ▸ **Privacy & Security** ▸
+   scroll to **Security** ▸ **Open Anyway**, then confirm.
+   *(Control-clicking the app and choosing **Open** used to do this. Apple removed
+   that override in macOS 15 Sequoia — on macOS 15 and later the Settings pane is
+   the only way.)*
 4. A **◉ V7** icon appears in the menu bar. Plug in the V7 — it shows *connected*.
 5. Optional: menu ▸ **Open at Login** to start it automatically every boot.
 
@@ -204,9 +208,11 @@ never have to trust a binary you didn't compile.
   ```
 
 - **Code signing**: the released app is **ad-hoc signed but not Apple-notarized**
-  (notarization requires a paid Apple Developer ID). Gatekeeper therefore prompts
-  once on first launch — right-click ▸ **Open** ▸ **Open**. Building from source
-  sidesteps this entirely.
+  (notarization requires a paid Apple Developer ID). Gatekeeper therefore blocks
+  the first launch; approve it once in **System Settings** ▸ **Privacy & Security**
+  ▸ **Open Anyway**. Control-click ▸ **Open** no longer works — [Apple removed that
+  override in macOS 15 Sequoia](https://developer.apple.com/news/?id=saqachfa).
+  Building from source sidesteps this entirely.
 
 ## Legal
 
