@@ -10,6 +10,34 @@
 #import <Cocoa/Cocoa.h>
 #import <CoreMIDI/CoreMIDI.h>
 #import <ServiceManagement/ServiceManagement.h>
+#import <signal.h>
+#import <IOKit/IOKitLib.h>
+
+/* Is the V7 physically on the USB bus right now?
+
+   Asked straight of IOKit rather than inferred from the bridge: the bridge is a
+   child process on a 3 s relaunch cycle, so "is the bridge up" lags reality by
+   seconds and reports nothing at all during the window where it has exited and
+   not yet been restarted. Calibration gates on this answer, and a gate that
+   says "unplugged" for three seconds after you plugged the cable back in is
+   worse than no gate. IOKit is synchronous and current. */
+static BOOL v7IsPluggedIn(void) {
+    CFMutableDictionaryRef m = IOServiceMatching("IOUSBHostDevice");
+    if(!m) return NO;
+    int vid=0x15E4, pid=0x0075;                       /* Numark V7 — see src/ploytec.h */
+    CFNumberRef v=CFNumberCreate(NULL,kCFNumberIntType,&vid);
+    CFNumberRef p=CFNumberCreate(NULL,kCFNumberIntType,&pid);
+    CFDictionarySetValue(m,CFSTR("idVendor"),v);
+    CFDictionarySetValue(m,CFSTR("idProduct"),p);
+    CFRelease(v); CFRelease(p);
+    io_iterator_t it=0;
+    /* IOServiceGetMatchingServices CONSUMES m — do not release it here. */
+    if(IOServiceGetMatchingServices(kIOMainPortDefault,m,&it)!=KERN_SUCCESS) return NO;
+    BOOL found=NO; io_object_t o;
+    while((o=IOIteratorNext(it))){ found=YES; IOObjectRelease(o); }
+    IOObjectRelease(it);
+    return found;
+}
 
 static NSColor *HEX(int r,int g,int b,double a){ return [NSColor colorWithSRGBRed:r/255.0 green:g/255.0 blue:b/255.0 alpha:a]; }
 
@@ -141,15 +169,31 @@ static NSColor *HEX(int r,int g,int b,double a){ return [NSColor colorWithSRGBRe
             c.d0B = (dB>=0) ? (uint8_t)dB : 0xFF;
             [_controls addObject:c];
         }
-        /* Knob presses -- MEASURED on this hardware, not inferred.
+        /* Knob presses -- MEASURED on this hardware, not inferred. These are
+           separate addresses from the rotation CC, so a knob carries both.
+
            BROWSE push = note 0x08. That also settles an open question in the
            docs, which had 0x08 flagged as "not LOAD PREPARE" with its panel
-           label unidentified: it is the browse encoder's push.
-           FX SELECT push = note 0x5A (its rotation is CC 0x5B).
-           These are separate from the rotation CC, so a knob carries both. */
+           label unidentified: it is the browse encoder's push. It has no deck-B
+           address because BROWSE is a single shared control, not per-deck (the
+           CC table in docs/CONTROL-MAP.md lists 0x44 with an empty deck-B
+           column).
+
+           FX SELECT push is a DECK PAIR: 0x53 on deck A, 0x5A on deck B --
+           the `0x53 / 0x5A` row of the note table, the same shape as its
+           neighbours FX ON (0x52/0x59) and MASTER (0x54/0x5B).
+
+           This previously carried 0x5A alone, in the deck-A slot, with no deck-B
+           address at all. 0x5A is the deck-B address, so with the switch on A
+           the press emitted 90 53 xx and matched nothing: the knob turned on
+           screen but pressing it did nothing, which is exactly the failure the
+           deck-pair comment on controlForStatus warns about. Re-measured here:
+           press gave `90 53 7f` / `90 53 00` and rotation `b0 5a 7f` with the
+           switch on A -- so the old note that rotation is CC 0x5B was the
+           deck-B half of that pair too. */
         for(V7Control *c in _controls){
             if([c.cid isEqual:@"browse"]){ c.pressStatus=0x90; c.pressD0=0x08; c.pressD0B=0xFF; }
-            if([c.cid isEqual:@"fxsel"]) { c.pressStatus=0x90; c.pressD0=0x5A; c.pressD0B=0xFF; }
+            if([c.cid isEqual:@"fxsel"]) { c.pressStatus=0x90; c.pressD0=0x53; c.pressD0B=0x5A; }
             if([c.cid isEqual:@"fxmix"])  c.faderInverted=YES;   /* max at the top */
         }
         [self loadMap];
@@ -526,6 +570,277 @@ static NSColor *HEX(int r,int g,int b,double a){ return [NSColor colorWithSRGBRe
 }
 @end
 
+// ============================================================ CalibrationWizard
+/* The V7's calibration is a HARDWARE routine stored in the unit's own firmware:
+   the USB cable is unplugged for its entire duration, so the app is blind to it
+   and can only guide. It used to be a single NSAlert holding all eleven steps
+   as one block of text -- the worst possible shape for a procedure you carry
+   out with both hands on a deck, glancing at the screen between actions. No
+   sense of place, nothing to mark off, and every instruction competing with ten
+   others. One instruction per screen instead.
+
+   Numark publishes ONE support article for the NS7 and the V7 together and
+   gives no V7-specific wording, so its "LEFT deck" / "RIGHT deck" references
+   are reproduced EXACTLY rather than reinterpreted for a single-deck unit. A
+   guess there would walk the operator through a procedure for hardware they do
+   not have; the first screen says so and points at the unit's LEDs as the
+   authority. */
+
+/* Content view that also carries the arrow keys, so the wizard can be driven
+   without aiming at a button -- the operator's hands are on the deck. */
+@interface CalWizardView : NSView
+@property (weak) id target;
+@property (assign) SEL prevAction, nextAction;
+@end
+@implementation CalWizardView
+- (BOOL)acceptsFirstResponder { return YES; }
+/* Painted here rather than via a backing layer: one flat fill does not need
+   layer-backing, and a layer-backed view renders blank through
+   cacheDisplayInRect:, which is how this panel gets proofed offscreen. */
+- (void)drawRect:(NSRect)r { (void)r; [HEX(16,20,28,1) setFill]; NSRectFill(self.bounds); }
+- (void)cancelOperation:(id)sender { (void)sender; [self.window close]; }   /* Esc */
+- (void)keyDown:(NSEvent*)e {
+    if(e.keyCode==123 && _prevAction){ [NSApp sendAction:_prevAction to:_target from:self]; return; }  /* left  */
+    if(e.keyCode==124 && _nextAction){ [NSApp sendAction:_nextAction to:_target from:self]; return; }  /* right */
+    [super keyDown:e];
+}
+@end
+
+@interface CalWizard : NSObject <NSWindowDelegate>
+@property (strong) NSWindow *win;
+@property (strong) NSArray<NSArray*> *steps;
+@property (assign) NSInteger idx;
+@property (strong) NSTextField *titleLbl,*counterLbl,*dotsLbl,*bodyLbl,*blockLbl,*footLbl;
+@property (strong) NSButton *backBtn,*nextBtn;
+@property (strong) NSTimer *poll;
+@property (assign) BOOL wasBlocked;
+- (void)show;
+@end
+
+@implementation CalWizard
+
+/* Verbatim from Numark's NS7/V7 calibration article, one instruction per entry
+   as @[title, body]. Do not "fix" the left/right deck references -- see above. */
+- (NSArray<NSArray*>*)buildSteps {
+    /* @[title, body, cableMustBeOut].
+
+       cableMustBeOut gates the Next button on the USB cable actually being
+       unplugged, checked against IOKit rather than trusted. It is NO on the
+       first screen -- the instruction to unplug has not been given yet, so
+       blocking there would demand an action before asking for it -- and NO on
+       the last, where reconnecting IS the instruction. Every screen in between
+       is a step of the live firmware routine, which a reconnect interrupts.
+
+       Bodies spanning several source lines are PARENTHESISED: inside an NSArray
+       literal, adjacent @"" literals are also how a missing comma looks, and
+       -Wobjc-string-concatenation rightly warns on it. The parens say "this
+       concatenation is deliberate" and keep the build warning-free.
+
+       Step text is verbatim from Numark's NS7/V7 calibration article. Do not
+       "fix" the left/right deck references -- see the note above this class. */
+    return @[
+      @[@"Before you begin",
+        (@"Calibration is stored in the V7's own firmware. OpenV7 cannot run it over USB — "
+          "the cable stays unplugged for every step that follows.\n\n"
+          "Numark publishes a single article covering both the NS7 and the V7, and it never says "
+          "what \u201cLEFT deck\u201d and \u201cRIGHT deck\u201d mean on a single-deck V7. Those references are "
+          "left exactly as Numark wrote them.\n\n"
+          "The LEDs on the unit are the source of truth. If they disagree with a step here, believe the unit."),
+        @NO],
+      @[@"Power off",
+        @"Unplug the USB cable and make sure the V7 is powered OFF.",
+        @YES],
+      @[@"Enter calibration mode",
+        (@"Hold the RIGHT deck HOT CUE buttons 1 and 3, then turn the power ON.\n\n"
+          "They flash twice to confirm calibration mode."),
+        @YES],
+      @[@"Wait for it to initialise",
+        @"Wait 10–20 seconds.",
+        @YES],
+      @[@"Maximum travel",
+        (@"Set every fader and knob to MAXIMUM / far right, and the pitch fader to the BOTTOM.\n\n"
+          "Press LEFT deck HOT CUE 1 when it lights."),
+        @YES],
+      @[@"Minimum travel",
+        (@"Set every fader and knob to MINIMUM / far left, and the pitch fader to the TOP.\n\n"
+          "Press LEFT deck HOT CUE 1 when it lights."),
+        @YES],
+      @[@"Left strip search",
+        (@"Touch the strip at the far RIGHT, then the far LEFT, then the CENTRE.\n\n"
+          "Press HOT CUE 1 at each of the three positions."),
+        @YES],
+      @[@"Right strip search",
+        (@"Repeat the far-right, far-left and centre touches on the right strip.\n\n"
+          "Press HOT CUE 1 at each of the three positions."),
+        @YES],
+      @[@"Centre everything",
+        @"Set all controls to the MIDDLE position, then press LEFT deck HOT CUE 1.",
+        @YES],
+      @[@"Confirmation",
+        @"LEFT deck HOT CUE 1–5 flash — calibration is complete.",
+        @YES],
+      @[@"Finish",
+        (@"Power-cycle the unit before reconnecting USB.\n\n"
+          "Then reconnect and use the Tester panel to confirm every fader reaches full travel "
+          "and the strip search responds end to end."),
+        @NO],
+    ];
+}
+
+- (instancetype)init {
+    if((self=[super init])){ _steps=[self buildSteps]; _idx=0; [self build]; }
+    return self;
+}
+
+- (void)build {
+    NSRect f=NSMakeRect(0,0,580,440);
+    _win=[[NSWindow alloc] initWithContentRect:f
+        styleMask:NSWindowStyleMaskTitled|NSWindowStyleMaskClosable
+        backing:NSBackingStoreBuffered defer:NO];
+    _win.title=@"Numark V7 — Calibration";
+    _win.releasedWhenClosed=NO;
+    /* Dark, so the system controls match the rest of the app rather than
+       rendering a bright panel next to the dark tester. */
+    if(@available(macOS 10.14,*)) _win.appearance=[NSAppearance appearanceNamed:NSAppearanceNameDarkAqua];
+    [_win center];
+
+    CalWizardView *cv=[[CalWizardView alloc] initWithFrame:f];
+    cv.target=self; cv.prevAction=@selector(back:); cv.nextAction=@selector(next:);
+    _win.contentView=cv;
+
+    CGFloat m=32, w=f.size.width-2*m;
+
+    _titleLbl=[NSTextField labelWithString:@""];
+    _titleLbl.frame=NSMakeRect(m,378,w-130,28);
+    _titleLbl.font=[NSFont systemFontOfSize:20 weight:NSFontWeightBold];
+    _titleLbl.textColor=NSColor.whiteColor;
+    [cv addSubview:_titleLbl];
+
+    _counterLbl=[NSTextField labelWithString:@""];
+    _counterLbl.frame=NSMakeRect(m+w-130,383,130,18);
+    _counterLbl.alignment=NSTextAlignmentRight;
+    _counterLbl.font=[NSFont monospacedSystemFontOfSize:11 weight:NSFontWeightMedium];
+    _counterLbl.textColor=HEX(139,147,165,1);
+    [cv addSubview:_counterLbl];
+
+    _dotsLbl=[NSTextField labelWithString:@""];
+    _dotsLbl.frame=NSMakeRect(m,356,w,18);
+    [cv addSubview:_dotsLbl];
+
+    /* Generous height: the longest body is the "Before you begin" caveat, and a
+       clipped instruction is worse than none. Nothing scrolls. */
+    _bodyLbl=[NSTextField wrappingLabelWithString:@""];
+    _bodyLbl.frame=NSMakeRect(m,164,w,186);
+    _bodyLbl.font=[NSFont systemFontOfSize:14];
+    _bodyLbl.textColor=HEX(210,218,230,1);
+    [cv addSubview:_bodyLbl];
+
+    /* Persistent, because it is true on EVERY screen. A warning that scrolls
+       away with step 1 is a warning you plugged the cable back in without. */
+    /* Shown only while the cable is in on a step that forbids it. Sits directly
+       under the instruction, where the eye already is, rather than beside the
+       button that quietly stopped working. */
+    _blockLbl=[NSTextField wrappingLabelWithString:@""];
+    _blockLbl.frame=NSMakeRect(m,116,w,40);
+    _blockLbl.font=[NSFont systemFontOfSize:13 weight:NSFontWeightSemibold];
+    _blockLbl.textColor=HEX(255,74,86,1);
+    [cv addSubview:_blockLbl];
+
+    /* Repeated on every screen it applies to, rather than stated once on step 1
+       and forgotten -- a cable warning that scrolled away ten screens ago is a
+       warning you plugged the cable back in without. Hidden on exactly the
+       screens where it is NOT true: the intro, and the finish step whose whole
+       instruction is to reconnect. A standing warning that contradicts the
+       instruction directly above it teaches the operator to ignore it. */
+    _footLbl=[NSTextField wrappingLabelWithString:
+        @"⚠  The USB cable stays UNPLUGGED for this step. This lives in the V7's firmware — OpenV7 cannot run it for you."];
+    _footLbl.frame=NSMakeRect(m,68,w,42);
+    _footLbl.font=[NSFont systemFontOfSize:11];
+    _footLbl.textColor=HEX(217,150,58,1);
+    [cv addSubview:_footLbl];
+
+    _backBtn=[NSButton buttonWithTitle:@"Back" target:self action:@selector(back:)];
+    _backBtn.frame=NSMakeRect(m,22,100,32); _backBtn.bezelStyle=NSBezelStyleRounded;
+    [cv addSubview:_backBtn];
+
+    _nextBtn=[NSButton buttonWithTitle:@"Next" target:self action:@selector(next:)];
+    _nextBtn.frame=NSMakeRect(m+w-120,22,120,32); _nextBtn.bezelStyle=NSBezelStyleRounded;
+    _nextBtn.keyEquivalent=@"\r";                       /* Return advances */
+    [cv addSubview:_nextBtn];
+
+    _win.delegate=self;
+    [self render];
+}
+
+/* The cable is in, on a step that requires it out. */
+- (BOOL)blocked { return [_steps[_idx][2] boolValue] && v7IsPluggedIn(); }
+
+/* Poll rather than subscribe to IOKit matching notifications: this window is
+   open for the length of a manual hardware procedure, twice a second costs
+   nothing, and a notification setup would be far more machinery for a gate that
+   only has to feel instant to someone reaching behind a deck. Re-renders only
+   on a CHANGE, so the panel is not rebuilt 120 times a minute. */
+- (void)pollTick {
+    BOOL b=[self blocked];
+    if(b!=_wasBlocked){ _wasBlocked=b; [self render]; }
+}
+- (void)windowWillClose:(NSNotification*)n { (void)n; [_poll invalidate]; _poll=nil; }
+
+- (void)render {
+    NSArray *st=_steps[_idx];
+    _titleLbl.stringValue=st[0];
+    _bodyLbl.stringValue=st[1];
+    _counterLbl.stringValue=[NSString stringWithFormat:@"Step %ld of %ld",(long)(_idx+1),(long)_steps.count];
+
+    /* Filled dots for everything up to and including the current step, so the
+       row reads as progress rather than as a position marker. */
+    NSMutableAttributedString *as=[NSMutableAttributedString new];
+    NSFont *df=[NSFont systemFontOfSize:12];
+    for(NSInteger i=0;i<(NSInteger)_steps.count;i++){
+        BOOL done=(i<=_idx);
+        [as appendAttributedString:[[NSAttributedString alloc]
+            initWithString:(done?@"● ":@"○ ")
+                attributes:@{NSFontAttributeName:df,
+                             NSForegroundColorAttributeName:(done?HEX(206,26,42,1):HEX(60,70,88,1))}]];
+    }
+    _dotsLbl.attributedStringValue=as;
+
+    _backBtn.enabled=(_idx>0);
+    _nextBtn.title=(_idx+1==(NSInteger)_steps.count)?@"Done":@"Next";
+
+    /* Refuse to advance while the V7 is still on the bus. The routine runs in
+       the unit's firmware with the host detached, so carrying on with the cable
+       in walks the operator through steps the hardware is not actually
+       performing -- and the first sign of that is a deck behaving oddly hours
+       later. Back stays live so they can still move around. */
+    _footLbl.hidden=![_steps[_idx][2] boolValue];
+    BOOL blocked=[self blocked];
+    _wasBlocked=blocked;
+    _nextBtn.enabled=!blocked;
+    _blockLbl.stringValue = blocked
+        ? @"⛔  The V7 is still connected. Unplug the USB cable to continue."
+        : @"";
+}
+
+- (void)back:(id)s { (void)s; if(_idx>0){ _idx--; [self render]; } }
+- (void)next:(id)s { (void)s;
+    if([self blocked]){ NSBeep(); [self render]; return; }   /* also covers Return and → */
+    if(_idx+1<(NSInteger)_steps.count){ _idx++; [self render]; } else [_win close];
+}
+
+/* Always reopens at step 1. Resuming mid-procedure would be a trap: if the
+   window was closed because the operator restarted the hardware routine,
+   dropping them back at step 7 resumes a procedure that is no longer running. */
+- (void)show {
+    _idx=0; [self render];
+    if(!_poll) _poll=[NSTimer scheduledTimerWithTimeInterval:0.5 target:self
+                        selector:@selector(pollTick) userInfo:nil repeats:YES];
+    [_win makeKeyAndOrderFront:nil];
+    [_win makeFirstResponder:_win.contentView];
+    [NSApp activateIgnoringOtherApps:YES];
+}
+@end
+
 // ============================================================ AppDelegate
 @interface AppDelegate : NSObject <NSApplicationDelegate, DeviceViewDelegate>
 @property (strong) NSStatusItem *item;
@@ -541,10 +856,20 @@ static NSColor *HEX(int r,int g,int b,double a){ return [NSColor colorWithSRGBRe
 @property (assign) MIDIPortRef inPort;
 @property (assign) MIDIPortRef outPort;    // to send to device
 @property (assign) MIDIEndpointRef dest;   // send target
+@property (assign) MIDIEndpointRef boundSrc;   // the source inPort is currently connected to
 @property (assign) BOOL connected;
+@property (assign) long lastRx;                // for "how long since the last message"
+@property (assign) NSTimeInterval lastRxAt;
 @property (strong) NSTimer *timer2;
 @property (strong) NSTextField *midiStat;
 @property (strong) id activityToken;
+@property (strong) CalWizard *calWiz;
+/* Set for the duration of stopBridge's teardown wait. That wait now pumps the
+   run loop (so the UI stays alive), which means the 3 s tick timer and a second
+   click on "Restart bridge" can both re-enter -- and relaunching the bridge
+   while the old one still holds the USB interfaces is the LIBUSB_ERROR_BUSY
+   race the wait exists to prevent. The guard makes pumping safe. */
+@property (assign) BOOL stopping;
 - (void)flushRx;
 @end
 
@@ -596,30 +921,115 @@ static void MIDIReadCB(const MIDIPacketList *pl, void *a, void *b) {
 - (BOOL)bridgeRunning { return _task && _task.isRunning; }
 
 - (void)startBridge {
-    if([self bridgeRunning]) return;
+    if(_stopping || [self bridgeRunning]) return;   /* never relaunch into a teardown */
     NSString *path=[self bridgePath]; if(!path) return;
     NSTask *t=[NSTask new]; t.executableURL=[NSURL fileURLWithPath:path];
+    /* --supervised: if this app is force-quit or crashes, applicationWillTerminate
+       never runs and the bridge is orphaned while still holding both USB
+       interfaces -- after which every relaunch is refused with
+       LIBUSB_ERROR_ACCESS. The flag makes the child exit on reparenting. */
+    t.arguments = @[@"--supervised"];
     t.qualityOfService = NSQualityOfServiceUserInteractive;   /* keep the child un-throttled */
     t.standardOutput=[NSFileHandle fileHandleWithNullDevice];
-    /* keep the bridge's status lines (handshake, teardown) in a support log */
-    [[NSFileManager defaultManager] createFileAtPath:@"/tmp/openv7_bridge.log" contents:nil attributes:nil];
-    NSFileHandle *elog=[NSFileHandle fileHandleForWritingAtPath:@"/tmp/openv7_bridge.log"];
+    /* Keep the bridge's status lines (handshake, teardown) in a support log --
+       APPENDED, not truncated.
+
+       The bridge is relaunched automatically whenever it exits, and recreating
+       the file on each launch destroyed the record of WHY the previous one
+       exited. That is precisely the evidence an intermittent startup fault
+       needs, and losing it is why a bridge that had lost its USB handle went
+       undiagnosed: every relaunch wiped the disconnect message that explained
+       it. Each launch is stamped so a failure can be tied to its run.
+
+       One generation is rolled at 1 MB, so an unattended run cannot fill /tmp
+       (a spin-forever bug once wrote 2.7 MB in a day). */
+    NSString *lp=@"/tmp/openv7_bridge.log";
+    NSFileManager *fm=[NSFileManager defaultManager];
+    NSDictionary *la=[fm attributesOfItemAtPath:lp error:NULL];
+    if(la && [la fileSize] > 1024*1024){
+        [fm removeItemAtPath:[lp stringByAppendingString:@".1"] error:NULL];
+        [fm moveItemAtPath:lp toPath:[lp stringByAppendingString:@".1"] error:NULL];
+    }
+    if(![fm fileExistsAtPath:lp]) [fm createFileAtPath:lp contents:nil attributes:nil];
+    NSFileHandle *elog=[NSFileHandle fileHandleForWritingAtPath:lp];
+    [elog seekToEndOfFile];
+    [elog writeData:[[NSString stringWithFormat:@"\n===== bridge launch %@ =====\n",
+        [NSDateFormatter localizedStringFromDate:[NSDate date]
+            dateStyle:NSDateFormatterShortStyle timeStyle:NSDateFormatterMediumStyle]]
+        dataUsingEncoding:NSUTF8StringEncoding]];
     t.standardError = elog ?: [NSFileHandle fileHandleWithNullDevice];
     NSError *e=nil; if([t launchAndReturnError:&e]) _task=t;
     _connected=NO;   // reconnect the tester to the freshly-published source
     [self refresh];
 }
 /* SIGTERM (not kill) so the bridge runs its graceful USB teardown, leaving the
-   device clean for the next launch. */
-- (void)stopBridge { if([self bridgeRunning]) [_task terminate]; _task=nil; }
+   device clean for the next launch -- then WAIT for it to actually exit.
 
+   [NSTask terminate] only DELIVERS the signal; it returns immediately while the
+   child is still inside a teardown that takes ~600 ms (cancel every transfer,
+   pump the event loop 12 x 50 ms, drop to the zero-bandwidth alt setting,
+   release both interfaces). Clearing _task straight afterwards made
+   bridgeRunning report NO while the old process was still very much alive, so
+   restart: launched the replacement into that window -- where it contended with
+   the dying process for the same USB interfaces and lost with
+   LIBUSB_ERROR_BUSY, which the bridge then swallowed and reported as a clean
+   bring-up. Waiting closes the window at the source.
+
+   Bounded and force-killed on timeout: a wedged child must never hang the UI. */
+- (void)stopBridge { [self stopBridgePumpingRunLoop:YES]; }
+
+/* pump=YES keeps the main run loop turning during the wait, so the menu and the
+   tester stay responsive instead of freezing for the ~600 ms teardown (a
+   sleep-only loop guarantees a visible hang on every "Restart bridge" and
+   "Quit"). Re-entry during the pump is blocked by _stopping.
+
+   pump=NO for applicationWillTerminate:, where AppKit is already tearing the
+   app down and running more main-thread work is not worth the risk -- there is
+   no UI left to keep responsive there anyway. */
+- (void)stopBridgePumpingRunLoop:(BOOL)pump {
+    if(![self bridgeRunning]){ _task=nil; return; }
+    NSTask *t=_task; _task=nil;
+    _stopping=YES;
+    [t terminate];
+    NSDate *deadline=[NSDate dateWithTimeIntervalSinceNow:2.0];
+    while(t.isRunning && [deadline timeIntervalSinceNow]>0){
+        if(pump) [[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode
+                                          beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.02]];
+        else     [NSThread sleepForTimeInterval:0.02];
+    }
+    /* BOUNDED, unlike the waitUntilExit this replaces. SIGKILL cannot be caught,
+       but it is not delivered until the target leaves any uninterruptible kernel
+       wait -- and this child sits in USB ioctls constantly, so "stuck in the
+       kernel" is a normal state for it, not an exotic one. An unbounded wait
+       here hangs the whole app with no way out; giving up after a second leaves
+       at worst one process that launchd reaps when we exit. */
+    if(t.isRunning){
+        kill(t.processIdentifier, SIGKILL);
+        NSDate *hard=[NSDate dateWithTimeIntervalSinceNow:1.0];
+        while(t.isRunning && [hard timeIntervalSinceNow]>0) [NSThread sleepForTimeInterval:0.02];
+    }
+    _stopping=NO;
+}
+
+/* Bind to the bridge's CoreMIDI source, re-binding whenever it is republished.
+
+   Keyed on the ENDPOINT REF, not on a _connected flag. Every bridge restart
+   disposes the old endpoint and creates a new one that happens to carry the
+   same name, so "already connected" is only true while the ref is unchanged --
+   the previous flag-only test could leave the port attached to a disposed
+   endpoint and consider the job done. Disconnecting the old ref first also
+   stops connections stacking up over a long session of restarts. */
 - (void)connectMIDI {
     if(!_client) MIDIClientCreate(CFSTR("OpenV7 Tester"), NULL, NULL, &_client);
     if(!_inPort) MIDIInputPortCreate(_client, CFSTR("in"), MIDIReadCB, NULL, &_inPort);
     if(!_outPort) MIDIOutputPortCreate(_client, CFSTR("out"), &_outPort);
     MIDIEndpointRef src=findEndpointNamed(@"Numark V7", YES);
     _dest = findEndpointNamed(@"Numark V7", NO);
-    if(src && !_connected){ MIDIPortConnectSource(_inPort, src, NULL); }
+    if(src != _boundSrc){
+        if(_boundSrc) MIDIPortDisconnectSource(_inPort, _boundSrc);
+        if(src) MIDIPortConnectSource(_inPort, src, NULL);
+        _boundSrc = src;
+    }
     _connected = (src!=0);
     [self updateMidiStat];
 }
@@ -630,11 +1040,31 @@ static void MIDIReadCB(const MIDIPacketList *pl, void *a, void *b) {
     p=MIDIPacketListAdd(pl,sizeof buf,p,0,n,b);
     MIDISend(_outPort, _dest, pl);
 }
+/* Report whether MIDI is actually MOVING, not just whether an endpoint exists.
+
+   "An endpoint named Numark V7 is registered" is a proxy, and a stale one: a
+   bridge holding a dead USB handle keeps its endpoint published, which is how
+   this line read "connected" for 11 hours while nothing arrived. The age of the
+   last message is the only real signal the tester has, so show it.
+
+   It is deliberately NOT rendered as a fault: the V7 is genuinely silent when
+   idle (docs/HANDOFF-MAC.md), so a long gap means "untouched" just as often as
+   "broken". Stating the age lets the operator tell the difference by spinning
+   the platter; claiming an error here would cry wolf on every idle deck. */
 - (void)updateMidiStat {
     if(!_midiStat) return;
-    _midiStat.stringValue = [NSString stringWithFormat:@"MIDI: %@ · %ld msgs in",
-        _connected?@"connected":@"waiting for bridge…", g_rxcount];
-    _midiStat.textColor = _connected ? HEX(59,189,138,1) : HEX(217,150,58,1);
+    if(!_connected){
+        _midiStat.stringValue=@"MIDI: waiting for bridge…";
+        _midiStat.textColor=HEX(217,150,58,1);
+        return;
+    }
+    NSTimeInterval now=[NSDate timeIntervalSinceReferenceDate];
+    if(g_rxcount!=_lastRx){ _lastRx=g_rxcount; _lastRxAt=now; }
+    NSString *age = _lastRxAt ? [NSString stringWithFormat:@"last %.0fs ago", now-_lastRxAt]
+                              : @"nothing yet";
+    _midiStat.stringValue=[NSString stringWithFormat:@"MIDI: connected · %ld msgs · %@",
+        g_rxcount, age];
+    _midiStat.textColor = HEX(59,189,138,1);
 }
 
 - (void)flushRx {
@@ -751,22 +1181,8 @@ static void MIDIReadCB(const MIDIPacketList *pl, void *a, void *b) {
 }
 - (void)openCalibration:(id)s {
     (void)s;
-    NSArray *steps=@[
-      @"Calibration is a HARDWARE procedure — do it with the USB cable UNPLUGGED. OpenV7 can't run it.",
-      @"1. Unplug USB; power the V7 OFF.",
-      @"2. Hold the RIGHT deck HOT CUE 1 + 3, then power ON. They flash twice = calibration mode.",
-      @"3. Wait 10–20 seconds.",
-      @"4. All faders/knobs to MAX (right), pitch faders to BOTTOM. Press LEFT HOT CUE 1 when lit.",
-      @"5. All faders/knobs to MIN (left), pitch faders to TOP. Press LEFT HOT CUE 1 when lit.",
-      @"6. Left strip: touch far-right, far-left, center — press HOT CUE 1 at each.",
-      @"7. Right strip: repeat far-right, far-left, center — press HOT CUE 1 at each.",
-      @"8. All controls to MIDDLE. Press LEFT HOT CUE 1.",
-      @"9. LEFT HOT CUE 1–5 flash = complete.",
-      @"10. Power-cycle before reconnecting USB. Then verify here in the Tester."
-    ];
-    NSAlert *a=[NSAlert new]; a.messageText=@"Numark V7 Calibration";
-    a.informativeText=[steps componentsJoinedByString:@"\n\n"];
-    [a addButtonWithTitle:@"Done"]; [a runModal];
+    if(!_calWiz) _calWiz=[CalWizard new];
+    [_calWiz show];
 }
 
 /* Diagnostic trace of the CoreMIDI receive path, appended to /tmp/openv7_gui.log
@@ -786,8 +1202,16 @@ static void MIDIReadCB(const MIDIPacketList *pl, void *a, void *b) {
         @"bridge=%d connected=%d rxCount=%ld testerVisible=%d inPort=%u src=%lu [%@]\n",
         [self bridgeRunning]?1:0, _connected?1:0, g_rxcount,
         _tester.isVisible?1:0, (unsigned)_inPort, (unsigned long)ns, names];
+    /* Rolled at 1 MB like the bridge log: this appends a line every 3 s forever
+       (~28,800 lines/day), so unbounded it is a slow /tmp leak. */
+    NSFileManager *gfm=[NSFileManager defaultManager];
+    NSDictionary *ga=[gfm attributesOfItemAtPath:@"/tmp/openv7_gui.log" error:NULL];
+    if(ga && [ga fileSize] > 1024*1024){
+        [gfm removeItemAtPath:@"/tmp/openv7_gui.log.1" error:NULL];
+        [gfm moveItemAtPath:@"/tmp/openv7_gui.log" toPath:@"/tmp/openv7_gui.log.1" error:NULL];
+    }
     NSFileHandle *fh=[NSFileHandle fileHandleForWritingAtPath:@"/tmp/openv7_gui.log"];
-    if(!fh){ [[NSFileManager defaultManager] createFileAtPath:@"/tmp/openv7_gui.log" contents:nil attributes:nil];
+    if(!fh){ [gfm createFileAtPath:@"/tmp/openv7_gui.log" contents:nil attributes:nil];
              fh=[NSFileHandle fileHandleForWritingAtPath:@"/tmp/openv7_gui.log"]; }
     if(fh){ [fh seekToEndOfFile]; [fh writeData:[line dataUsingEncoding:NSUTF8StringEncoding]]; [fh closeFile]; }
 }
@@ -841,7 +1265,7 @@ static void MIDIReadCB(const MIDIPacketList *pl, void *a, void *b) {
     _timer=[NSTimer scheduledTimerWithTimeInterval:3.0 target:self selector:@selector(tick) userInfo:nil repeats:YES];
     [self refresh];
 }
-- (void)applicationWillTerminate:(NSNotification*)n { (void)n; [self stopBridge]; }
+- (void)applicationWillTerminate:(NSNotification*)n { (void)n; [self stopBridgePumpingRunLoop:NO]; }
 @end
 
 int main(void){
