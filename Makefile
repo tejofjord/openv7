@@ -5,6 +5,28 @@ PREFIX   ?= /usr/local
 
 CC       ?= clang
 CFLAGS   ?= -O2 -Wall -Wextra -std=c11
+
+# Version stamps. A Mach-O records a floor (minos) and the SDK it was built
+# against, and BOTH gate launch. With neither flag set, clang stamps the build
+# host's SDK into both -- so a binary built on a macOS seed refuses to run
+# anywhere but that seed. MACOS_MIN tracks LSMinimumSystemVersion in
+# app/Info.plist; tools/pick-sdk.sh keeps the SDK off unreleased majors and is
+# shared with dist/build-app.sh so the two build paths cannot drift.
+MACOS_MIN ?= $(shell /usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' app/Info.plist)
+SDKROOT   ?= $(shell ./tools/pick-sdk.sh)
+
+# Fail loudly on an empty value. An empty -isysroot does not error: it silently
+# consumes the NEXT flag as its argument, so the build would lose its version
+# stamp and look fine while producing exactly the binary this is here to prevent.
+ifeq ($(strip $(SDKROOT)),)
+$(error could not determine an SDK -- run ./tools/pick-sdk.sh to see why)
+endif
+ifeq ($(strip $(MACOS_MIN)),)
+$(error could not read LSMinimumSystemVersion from app/Info.plist)
+endif
+
+CFLAGS   += -isysroot $(SDKROOT) -mmacosx-version-min=$(MACOS_MIN)
+LDFLAGS  += -isysroot $(SDKROOT) -mmacosx-version-min=$(MACOS_MIN)
 CFLAGS   += $(shell pkg-config --cflags libusb-1.0)
 # CoreMIDI's MIDIPacketList API is deprecated on recent macOS but still works;
 # silence the warnings for v1.

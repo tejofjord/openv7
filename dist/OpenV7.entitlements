@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Entitlements for the DISTRIBUTION build (DEVELOPER_ID set in dist/build-app.sh).
+
+  Notarization requires the hardened runtime, and the hardened runtime gates
+  device access behind entitlements. The bridge drives the V7 over libusb, which
+  goes through IOKit's USB stack, so without com.apple.security.device.usb a
+  notarized build would launch fine and then never see the controller.
+
+  This app is NOT sandboxed, so nothing else here is required. Keep the list
+  minimal: every entitlement is a claim reviewed at notarization.
+-->
+<plist version="1.0">
+<dict>
+    <key>com.apple.security.device.usb</key> <true/>
+</dict>
+</plist>
