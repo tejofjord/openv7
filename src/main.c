@@ -497,6 +497,59 @@ static void LIBUSB_CALL out_cb(struct libusb_transfer *t) {
     libusb_free_transfer(t);
 }
 static struct midi_split g_in;                        /* device-side parser state */
+/* ---- --diag-jog: is the platter's timestamp stream actually smooth? --------
+   PURELY OBSERVATIONAL. Nothing here changes a byte that reaches the app; it
+   exists to settle a question that cannot be settled by reading code.
+
+   The platter sends a position CC paired 1:1 with an 0xE0 pitch-bend carrying a
+   timestamp off a 2,822,400 Hz clock (44100 x 64 -- see docs/PROTOCOL.md). A
+   host that scratches from this stream computes velocity as position-delta over
+   TIMESTAMP-delta, so three separate things can each make that velocity noisy,
+   and they call for completely different fixes:
+
+     1. the device's own clock is uneven      -> dt spread is wide
+     2. we are dropping or reordering frames  -> e0/s and pos/s stop matching
+     3. the device is fine but WE deliver in  -> dt spread is tight while the
+        clumps                                   host inter-arrival spread is wide
+
+   So measure all three at once: the device's timestamp delta, the pairing
+   count, and the wall-clock gap between arrivals as seen from this process. */
+static int g_diag_jog = 0;
+
+static long     g_jog_n, g_jog_pos_n;          /* 0xE0s and paired position CCs  */
+static int      g_jog_have;                    /* seen a first 0xE0 to diff from */
+static unsigned g_jog_prev;                    /* previous 14-bit timestamp      */
+static long     g_jog_dsum; static unsigned g_jog_dmin, g_jog_dmax;   /* clock units */
+static long     g_jog_hsum; static long g_jog_hmin, g_jog_hmax;       /* host us     */
+static long     g_jog_hprev;
+
+static long now_us(void) {
+    struct timeval tv; gettimeofday(&tv, NULL);
+    return tv.tv_sec * 1000000L + tv.tv_usec;
+}
+
+static void jog_stat(const uint8_t *m, int n) {
+    if (n < 3) return;
+    /* Position CCs: 0x00 is deck A, 0x02 deck B (docs/CONTROL-MAP.md). Counted
+       only to check the 1:1 pairing survives our own parser. */
+    if ((m[0] & 0xF0) == 0xB0 && (m[1] == 0x00 || m[1] == 0x02)) { g_jog_pos_n++; return; }
+    if ((m[0] & 0xF0) != 0xE0) return;
+
+    unsigned v = (unsigned)m[1] | ((unsigned)m[2] << 7);   /* 14-bit, LSB first */
+    long h = now_us();
+    if (g_jog_have) {
+        unsigned d = (v - g_jog_prev) & 0x3FFF;   /* the counter wraps every 16384 */
+        long hd = h - g_jog_hprev;
+        if (g_jog_n == 0) { g_jog_dmin = g_jog_dmax = d; g_jog_hmin = g_jog_hmax = hd; }
+        else {
+            if (d  < g_jog_dmin) g_jog_dmin = d;   if (d  > g_jog_dmax) g_jog_dmax = d;
+            if (hd < g_jog_hmin) g_jog_hmin = hd;  if (hd > g_jog_hmax) g_jog_hmax = hd;
+        }
+        g_jog_dsum += d; g_jog_hsum += hd; g_jog_n++;
+    }
+    g_jog_prev = v; g_jog_hprev = h; g_jog_have = 1;
+}
+
 static void LIBUSB_CALL ctrl_in_cb(struct libusb_transfer *t) {
     int idx = (int)(intptr_t)t->user_data;
     g_in_live[idx] = 0;                                /* no longer in flight */
@@ -507,6 +560,7 @@ static void LIBUSB_CALL ctrl_in_cb(struct libusb_transfer *t) {
             int n = midi_feed(&g_in, t->buffer[i], out);
             if (n > 0) {
                 midi_to_apps(out, n);
+                if (g_diag_jog) jog_stat(out, n);
                 if (g_learn) learn_note(out[0], out[1], n == 3 ? out[2] : 0);
                 if (g_verbose) {
                     fprintf(stderr, "  in  ");
@@ -591,14 +645,19 @@ int main(int argc, char **argv) {
         if (!strcmp(argv[i], "-v") || !strcmp(argv[i], "--verbose")) g_verbose = 1;
         else if (!strcmp(argv[i], "--learn")) g_learn = 1;
         else if (!strcmp(argv[i], "--diag")) g_diag = 1;
+        else if (!strcmp(argv[i], "--diag-jog")) g_diag_jog = 1;
         else if (!strcmp(argv[i], "--no-keepalive")) g_keepalive = 0;
         else if (!strcmp(argv[i], "--supervised")) g_supervised = 1;
         else if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help")) {
             printf("OpenV7 — Numark V7 userspace driver\n"
-                   "usage: openv7 [-v|--verbose] [--learn] [--diag]\n"
+                   "usage: openv7 [-v|--verbose] [--learn] [--diag] [--diag-jog]\n"
                    "  -v        print decoded MIDI as it arrives\n"
                    "  --learn   catalog each control once (touch every control, Ctrl-C for the map)\n"
                    "  --diag    print isochronous stream health once a second (~200/~62 = healthy)\n"
+                   "  --diag-jog\n"
+                   "            print platter timestamp-clock health once a second: whether the\n"
+                   "            device's 0xE0 clock is smooth, whether position/timestamp stay\n"
+                   "            paired 1:1, and whether WE deliver them evenly. Observational.\n"
                    "  --no-keepalive\n"
                    "            disable the control-stream keepalives (25 ms 0xFD frame on bulk\n"
                    "            0x04 + 2 s EP0 re-arm). They are ON by default: without them the\n"
@@ -727,6 +786,7 @@ int main(int argc, char **argv) {
         fprintf(stderr, "OpenV7: running. Select \"Numark V7\" in your DJ app. Ctrl-C to stop.\n");
 
     long diag_o0 = 0, diag_i0 = 0; time_t diag_t = time(NULL), rearm_t = time(NULL);
+    time_t jog_t = time(NULL);
     unsigned char idle_frame[V7_OUT_FRAME_LEN]; memset(idle_frame, V7_MIDI_IDLE, V7_OUT_FRAME_LEN);
     struct timeval tvn; gettimeofday(&tvn, NULL); long ka04_ms = tvn.tv_sec*1000 + tvn.tv_usec/1000;
     while (!g_quit) {
@@ -801,6 +861,29 @@ int main(int argc, char **argv) {
                         in_armed, CTRL_IN_NXFER,
                         iso_armed, ISO_NXFER * 2);
                 diag_o0 = g_isoout_cmpl; diag_i0 = g_isoin_cmpl; diag_t = now;
+            }
+        }
+        if (g_diag_jog) {
+            time_t now = time(NULL);
+            if (now != jog_t) {
+                if (g_jog_n) {
+                    double dmean = (double)g_jog_dsum / g_jog_n;
+                    double hmean = (double)g_jog_hsum / g_jog_n;
+                    fprintf(stderr,
+                        "  [jog] e0/s=%ld pos/s=%ld | device dt mean=%.0f min=%u max=%u units"
+                        " | host gap mean=%.0f min=%ld max=%ld us | implied clock %.0f Hz (expect 2822400)\n",
+                        g_jog_n, g_jog_pos_n, dmean, g_jog_dmin, g_jog_dmax,
+                        hmean, g_jog_hmin, g_jog_hmax, dmean * (double)g_jog_n);
+                } else if (g_jog_pos_n) {
+                    fprintf(stderr, "  [jog] pos/s=%ld but ZERO 0xE0 timestamps — the 1:1 pairing is broken\n",
+                            g_jog_pos_n);
+                } else {
+                    /* Say so explicitly. An empty readout must never be mistaken
+                       for a measurement: spin the platter or the motor to feed it. */
+                    fprintf(stderr, "  [jog] idle — platter not moving, nothing to measure\n");
+                }
+                g_jog_n = g_jog_pos_n = 0; g_jog_dsum = 0; g_jog_hsum = 0;
+                jog_t = now;
             }
         }
     }
