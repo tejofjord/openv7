@@ -201,7 +201,7 @@ Byte 2 of the firmware response (step 1) is a decimal-encoded version:
 - ✅ **Inbound frame layout** (bulk IN `0x83`), captured verbatim while the
   platter was turning:
 
-  ```
+  ```text
   b0 00 7e   e0 71 75   FD x35   00
   |________| |________| |_____|  |_|
    CC 0x00    pitch-bend padding  terminator
@@ -255,7 +255,7 @@ Byte 2 of the firmware response (step 1) is a decimal-encoded version:
 - ✅ **Output**: send one MIDI message per 42-byte frame on bulk `0x04`. The
   exact frame the vendor driver puts on the wire is:
 
-  ```
+  ```text
   B0 43 00  FD x38  E0        <- soft-start, captured verbatim
   |_______|  |____|  |_|
    3-byte    padding  terminator

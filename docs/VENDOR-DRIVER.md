@@ -64,7 +64,7 @@ Three things follow, and together they explain the long-idle stall:
 1. **It is a first-class transaction stream.** The keepalive has its own
    `initNextTransaction…` scheduler, exactly parallel to the audio ones:
 
-   ```
+   ```text
    initNextTransactionIn        to late current:%d diff:%d NTF:%d lostFrames:%d
    initNextTransactionOut       to late current:%d diff:%d NTF:%d lostFrames:%d
    initNextTransactionKeepAlive CALLBACK to late …

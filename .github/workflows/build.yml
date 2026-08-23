@@ -33,7 +33,9 @@ jobs:
         run: make app
 
       - name: Docs lint
-        run: ./tools/check-docs.sh
+        run: |
+          ./tools/check-docs-test.sh    # the linter's own fixtures first
+          ./tools/check-docs.sh
 
       - name: Upload DMG
         uses: actions/upload-artifact@v4
