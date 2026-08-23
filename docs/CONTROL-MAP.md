@@ -57,7 +57,7 @@ Continuous controls use the standard MIDI 14-bit convention — **coarse on CC
 | `0x44` | — | **Browse / track select knob** | ✅ |
 | `0x56`, `0x58` | | FX parameter — ⚠️ **RELATIVE**, not absolute | `0x58` ✅ measured |
 | `0x57` + `0x77` | `0x59` + `0x79` | FX slider (coarse + fine) | ✅ |
-| `0x5A`, `0x5B` | | FX select — ⚠️ **RELATIVE**; `0x5B` seen on the wire | ✅ |
+| `0x5A` | `0x5B` | FX select — ⚠️ **RELATIVE**; deck pair, both halves measured | ✅ |
 
 Each platter position message is paired 1:1 with a `0xE0` pitch-bend carrying a
 14-bit timestamp on a **2,822,400 Hz** clock ✅ — that pairing is what yields
@@ -144,8 +144,8 @@ velocity. A stationary platter sends nothing at all ✅.
 > `0x7F` for direction exactly as BROWSE and FX SELECT do — no position, no
 > centre, no end stops. The earlier entry implied a 0..127 knob; a host that
 > renders it as one pegs the indicator at an end and it never moves. The deck's
-> three relative encoders are BROWSE (`0x44`), FX SELECT (`0x5B`) and FX PARAM
-> (`0x58`).
+> three relative encoders are BROWSE (`0x44`), FX SELECT (`0x5A` on deck A /
+> `0x5B` on deck B) and FX PARAM (`0x58`).
 >
 > ⚠️ **Open:** in the same capture CC `0x00` arrived 102 times with a constant
 > value `02`, and CC `0x01` 33 times with a constant `00`. Constant values are

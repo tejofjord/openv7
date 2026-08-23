@@ -864,6 +864,12 @@ static NSColor *HEX(int r,int g,int b,double a){ return [NSColor colorWithSRGBRe
 @property (strong) NSTextField *midiStat;
 @property (strong) id activityToken;
 @property (strong) CalWizard *calWiz;
+/* Set for the duration of stopBridge's teardown wait. That wait now pumps the
+   run loop (so the UI stays alive), which means the 3 s tick timer and a second
+   click on "Restart bridge" can both re-enter -- and relaunching the bridge
+   while the old one still holds the USB interfaces is the LIBUSB_ERROR_BUSY
+   race the wait exists to prevent. The guard makes pumping safe. */
+@property (assign) BOOL stopping;
 - (void)flushRx;
 @end
 
@@ -915,7 +921,7 @@ static void MIDIReadCB(const MIDIPacketList *pl, void *a, void *b) {
 - (BOOL)bridgeRunning { return _task && _task.isRunning; }
 
 - (void)startBridge {
-    if([self bridgeRunning]) return;
+    if(_stopping || [self bridgeRunning]) return;   /* never relaunch into a teardown */
     NSString *path=[self bridgePath]; if(!path) return;
     NSTask *t=[NSTask new]; t.executableURL=[NSURL fileURLWithPath:path];
     /* --supervised: if this app is force-quit or crashes, applicationWillTerminate
@@ -970,14 +976,39 @@ static void MIDIReadCB(const MIDIPacketList *pl, void *a, void *b) {
    bring-up. Waiting closes the window at the source.
 
    Bounded and force-killed on timeout: a wedged child must never hang the UI. */
-- (void)stopBridge {
+- (void)stopBridge { [self stopBridgePumpingRunLoop:YES]; }
+
+/* pump=YES keeps the main run loop turning during the wait, so the menu and the
+   tester stay responsive instead of freezing for the ~600 ms teardown (a
+   sleep-only loop guarantees a visible hang on every "Restart bridge" and
+   "Quit"). Re-entry during the pump is blocked by _stopping.
+
+   pump=NO for applicationWillTerminate:, where AppKit is already tearing the
+   app down and running more main-thread work is not worth the risk -- there is
+   no UI left to keep responsive there anyway. */
+- (void)stopBridgePumpingRunLoop:(BOOL)pump {
     if(![self bridgeRunning]){ _task=nil; return; }
     NSTask *t=_task; _task=nil;
+    _stopping=YES;
     [t terminate];
     NSDate *deadline=[NSDate dateWithTimeIntervalSinceNow:2.0];
-    while(t.isRunning && [deadline timeIntervalSinceNow]>0)
-        [NSThread sleepForTimeInterval:0.02];
-    if(t.isRunning){ kill(t.processIdentifier, SIGKILL); [t waitUntilExit]; }
+    while(t.isRunning && [deadline timeIntervalSinceNow]>0){
+        if(pump) [[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode
+                                          beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.02]];
+        else     [NSThread sleepForTimeInterval:0.02];
+    }
+    /* BOUNDED, unlike the waitUntilExit this replaces. SIGKILL cannot be caught,
+       but it is not delivered until the target leaves any uninterruptible kernel
+       wait -- and this child sits in USB ioctls constantly, so "stuck in the
+       kernel" is a normal state for it, not an exotic one. An unbounded wait
+       here hangs the whole app with no way out; giving up after a second leaves
+       at worst one process that launchd reaps when we exit. */
+    if(t.isRunning){
+        kill(t.processIdentifier, SIGKILL);
+        NSDate *hard=[NSDate dateWithTimeIntervalSinceNow:1.0];
+        while(t.isRunning && [hard timeIntervalSinceNow]>0) [NSThread sleepForTimeInterval:0.02];
+    }
+    _stopping=NO;
 }
 
 /* Bind to the bridge's CoreMIDI source, re-binding whenever it is republished.
@@ -1234,7 +1265,7 @@ static void MIDIReadCB(const MIDIPacketList *pl, void *a, void *b) {
     _timer=[NSTimer scheduledTimerWithTimeInterval:3.0 target:self selector:@selector(tick) userInfo:nil repeats:YES];
     [self refresh];
 }
-- (void)applicationWillTerminate:(NSNotification*)n { (void)n; [self stopBridge]; }
+- (void)applicationWillTerminate:(NSNotification*)n { (void)n; [self stopBridgePumpingRunLoop:NO]; }
 @end
 
 int main(void){

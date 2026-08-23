@@ -23,7 +23,7 @@ handle names an enumeration that no longer exists — so unplugging the V7 wedge
 the bridge instead of ending it. Caught live on this machine after an 11-hour
 unplug:
 
-```
+```text
 OpenV7: handshake complete, device armed.        <- clean bring-up
 OpenV7: control-IN submit failed (LIBUSB_ERROR_PIPE) — retrying      x4
 OpenV7: control-IN submit failed (LIBUSB_ERROR_NO_DEVICE) — retrying x37,946
