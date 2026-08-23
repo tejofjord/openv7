@@ -183,7 +183,7 @@ certainly a *response* to the re-arm, not something the device volunteers.
 Captured from the vendor driver by restarting its device node. The entire
 recovery is four operations inside 2 ms:
 
-```
+```text
 ABORT_PIPE            iso IN  0x81   (x2)
 ABORT_PIPE            iso OUT 0x02   (x2)
 SELECT_CONFIGURATION  (SET_CONFIGURATION, bRequest 9, wLength 8)
@@ -209,7 +209,7 @@ forces re-enumeration — which fits its observed coin-flip behaviour.
 **There is no codec to write for output.** Captured with a known 441 Hz sine
 played into the device:
 
-```
+```text
 1139cc 1139cc 000000 000000 | 88f6c9 88f6c9 000000 000000
   ch1    ch2    ch3    ch4  |   ch1    ch2    ch3    ch4
 ```

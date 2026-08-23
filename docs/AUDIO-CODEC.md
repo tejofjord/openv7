@@ -81,7 +81,7 @@ Captured with a 441 Hz sine at amplitude 0.5 rendered straight into the V7's
 own endpoint via WASAPI (`tools/win/capture-audio.ps1`), so the payload is a
 known signal. The iso-OUT bytes come out as:
 
-```
+```text
 1139cc 1139cc 000000 000000 | 88f6c9 88f6c9 000000 000000 | 98eac7 98eac7 000000 000000
   ch1    ch2    ch3    ch4  |   ch1    ch2    ch3    ch4  |   ch1    ch2    ch3    ch4
 ```
@@ -233,7 +233,7 @@ matches what OpenV7 already observed on the V7's bulk `0x04`.
 This also explains two strings in the Windows driver (see
 [VENDOR-DRIVER.md](VENDOR-DRIVER.md)):
 
-```
+```text
 USBMidiPattern::initForBulk sr:%d rtsBulkOutFramesPerBlock:%d
 ALERT mRtsBulkOutFramesPerBlock==0
 ```
@@ -245,7 +245,7 @@ computed from the sample rate rather than hardcoded.
 
 3-byte little-endian, both directions:
 
-```
+```text
 GET_CUR   bmRequestType 0xA2  bRequest 0x81  wValue 0x0100  wLength 3
 SET_CUR   bmRequestType 0x22  bRequest 0x01  wValue 0x0100  wLength 3
 ```
@@ -269,7 +269,7 @@ Ozzy decodes one more field:
 
 The vendor driver derives a codec selector from bit depth:
 
-```
+```text
 format_id = (resolution_bits - 16) / 4     # 16→0, 20→1, 24→2, 32→4
 ```
 

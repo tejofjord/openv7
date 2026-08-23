@@ -15,7 +15,7 @@ app — **VirtualDJ**, Mixxx, Ableton — sees as a normal MIDI controller.
 
 No kernel extension. No system modification. Just a program you run.
 
-```
+```text
   Numark V7 ──(USB, Ploytec)──►  openv7  ──► CoreMIDI "Numark V7" ──► VirtualDJ
             ◄──(motor, LEDs)───          ◄──                       ◄──
 ```
@@ -106,7 +106,7 @@ openv7               # -v prints decoded MIDI, --learn maps controls
 
 You should see:
 
-```
+```text
 OpenV7: device claimed.
   V7 firmware: chip 0x33
 OpenV7: handshake complete, device armed.

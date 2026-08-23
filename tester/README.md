@@ -1,4 +1,14 @@
-# OpenV7 Tester
+# OpenV7 Tester (standalone, browser)
+
+> **This is not the tester the app opens.** OpenV7.app has its own native
+> AppKit tester — **menu ▸ Open Tester…** (⌘T) — which is the one that is
+> maintained, ships in the DMG, and carries the measured control map. This
+> folder is a standalone browser version kept for people who want to poke at
+> the V7 from a machine that is not running the app.
+>
+> It is no longer copied into the app bundle, and the "Open Tester…" menu item
+> does **not** open it. The two do not share a control map: this page keeps its
+> own in browser storage.
 
 A visual, browser-based tester for the Numark V7 — it lights up controls as you
 press them, logs raw MIDI, learns your control map, and walks you through the
@@ -19,7 +29,6 @@ python3 -m http.server 8730
 ```
 
 Then open **http://localhost:8730** in Chrome and allow MIDI access when asked.
-(The OpenV7 app will grow an **Open Tester…** menu item that does this for you.)
 
 ## What you can do
 

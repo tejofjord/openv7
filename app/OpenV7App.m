@@ -114,6 +114,11 @@ static NSColor *HEX(int r,int g,int b,double a){ return [NSColor colorWithSRGBRe
           @[@"strip",      @"STRIP SEARCH",   @0.34600,@0.03074,@0.30800,@0.03978,@"strip",@176,@69,@77],
           @[@"beatdiff",   @"BEAT DIFF",      @0.42400,@0.10488,@0.16000,@0.02170,@"meter",@0,@-1,@-1],
           @[@"browse",     @"BROWSE",         @0.80400,@0.01447,@0.07200,@0.06510,@"encoder",@176,@68,@-1],
+          /* NOTE 0x24/0x45: this panel calls it LOOP CONTROL; docs/CONTROL-MAP.md
+             calls it RELOOP / EXIT, from the Mixxx key `reloop_exit`. The ADDRESS is
+             measured, the FUNCTION is not -- and 0x2B is separately mapped as RELOOP
+             below, so one of the two is a duplicate. Flagged in CONTROL-MAP.md;
+             settling it needs someone at a V7, not more inference. */
           @[@"loopctl",    @"L.CTRL",   @0.06200,@0.07052,@0.06800,@0.03978,@"btn",@144,@36,@69],
           @[@"loopmode",   @"MODE",      @0.22400,@0.06329,@0.06800,@0.03978,@"btn",@144,@39,@72],
           @[@"loopin",     @"IN",        @0.02200,@0.12658,@0.06800,@0.03978,@"btn",@144,@40,@73],
@@ -140,6 +145,10 @@ static NSColor *HEX(int r,int g,int b,double a){ return [NSColor colorWithSRGBRe
           @[@"reverse",    @"BLEEP",      @0.04000,@0.30380,@0.06800,@0.09403,@"switch",@144,@28,@61],
           @[@"tap",        @"TAP",            @0.04000,@0.45570,@0.08800,@0.04340,@"btn",@144,@30,@63],
           @[@"fxsel",      @"FX SEL",      @0.05600,@0.54250,@0.06800,@0.06148,@"encoder",@176,@90,@91],
+          /* CC 0x58 (88) is measured; 0x56 (86) as its DECK-B partner is not, and
+             it is the one deck split on this device that runs backwards -- every
+             other block puts deck B above deck A. Both are bound so the knob lights
+             either way; only the A/B labelling is in doubt. See CONTROL-MAP.md. */
           @[@"fxparam",    @"FX PRM",       @0.03200,@0.62929,@0.07600,@0.06872,@"encoder",@176,@88,@86],
           @[@"fxmix",      @"FX MIX",         @0.04800,@0.71971,@0.06000,@0.12658,@"fader",@176,@87,@89],
           @[@"fxon",       @"FX ON",      @0.03600,@0.90416,@0.08800,@0.04702,@"btn",@144,@82,@89],
