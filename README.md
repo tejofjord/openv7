@@ -65,7 +65,7 @@ hardware (✅) or mapped from a corroborating source and flagged as unconfirmed
 1. Download **OpenV7.dmg** from the [Releases](../../releases) page.
 2. Open it and drag **OpenV7** into **Applications**.
 3. Double-click **OpenV7**. The build isn't notarized, so macOS blocks the first
-   launch. Approve it once in  ▸ **System Settings** ▸ **Privacy & Security** ▸
+   launch. Approve it once in **System Settings** ▸ **Privacy & Security** ▸
    scroll to **Security** ▸ **Open Anyway**, then confirm.
    *(Control-clicking the app and choosing **Open** used to do this. Apple removed
    that override in macOS 15 Sequoia — on macOS 15 and later the Settings pane is
