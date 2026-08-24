@@ -20,7 +20,7 @@ reproduces it.
 
 ## X4 — VirtualDJ **does** command the motor ✅
 
-```
+```text
 b0 41 7f  x3    MOTOR instant start
 b0 42 7f  x2    MOTOR instant stop
 ```
@@ -49,7 +49,7 @@ blinking at a 500 ms period and nothing else.
 
 Per-second frame counts while playing and scratching:
 
-```
+```text
 t=1..t=12   1000, 1000, 1000, 1000, 1000, 999, 1001, 1000, 1000, 1000, 1000, 1000
 t=13..t=26  (platter stopped - paused)
 t=27..t=40  956, 1001, 1000, 1000, 1000, ...

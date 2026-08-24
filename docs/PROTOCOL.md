@@ -406,7 +406,7 @@ is not established; the Ploytec codec core is 8-channel.
 capture **11.7 %** of frames start with a leftover data byte belonging to the
 previous frame's message:
 
-```
+```text
 frame N     b0 00 16   e0 4d             fd..fd 00     <- pitch-bend MSB absent
 frame N+1   0b         b0 00 18  e0 02   fd..fd 00     <- it is here
             ^ that MSB
@@ -467,25 +467,62 @@ not that the rate was fixed by the hardware.
 
 This matters because the old framing led somewhere unproductive: if ~17 ms gaps
 were inherent, a host would have to tolerate them, and the search moves to wrap
-handling and interpolation. They are not inherent, so the useful question is
-**why the bridge drops frames the vendor driver does not**.
+handling and interpolation. They are not inherent.
 
-### The 7-bit position counter is ambiguous across long gaps
+#### ✅ Answered: the bridge was not dropping frames, the parser was discarding messages
 
-`B0 00 vv` is a **7-bit** absolute counter, so it wraps every 128 counts — about
-**64 ms** at 33 RPM. Turning it into absolute motion requires assuming each step
-is less than half the range. Measured, steps of **64 or more counts occur about
-1.3 times a second** (observed: 64, 65, 66, 67, 68, 70, 78, 84, 93, 103).
+Replaying the captured frames through OpenV7's own `midi_feed` reproduces the
+shortfall **with no USB loss at all** — the input is a perfect capture:
 
-Each of those is genuinely undecidable: +66 forward and −62 backward are the
-same byte. A consumer that guesses wrong moves the playhead by up to a third of
-a revolution. On a motorized deck, where the platter *is* the transport, that is
-an audible jump rather than a small error.
+| | positions | timestamps | jumps > 8 counts |
+|---|---|---|---|
+| `midi_feed` as shipped | 11,416 | 11,413 | 33 |
+| correct stream parse | **12,124** | **12,124** | **0** |
 
-Serato documents track skipping on the V7/NS7/NS7II as a
-[known issue](https://support.serato.com/hc/en-us/articles/203682530) with their
-own driver and software, which is consistent with this being inherent to the
-encoding rather than specific to any one host.
+708 positions and 711 timestamps — **5.8%** — were destroyed inside the parser.
+It cleared `status`/`ndata`/`insysex` after every padding run, treating each
+42-byte frame as self-contained. **11.7% of frames begin mid-message** (1,419 of
+12,161), so every straddling message was thrown away, and the damage falls
+hardest on the `0xE0` a host times the jog from. Fixed by parsing the byte
+stream underneath the frames; `make corpus` now grades the splitter against all
+12,161 frames.
+
+*Not yet closed:* 5.8% is most of the observed 6.4% shortfall but not provably
+all of it. Confirming that requires the deck — compare frames received
+(`g_ctrl_bytes` / 42) against messages emitted.
+
+### ⚠️ The 7-bit counter is ambiguous only if you have already lost frames — corrected
+
+> **This section previously claimed steps of 64+ counts occur ~1.3 times a
+> second, making the counter inherently ambiguous. That measurement was taken
+> from OpenV7's own output, which was dropping 5.8% of messages. It does not
+> describe the device.**
+
+`B0 00 vv` is a **7-bit** absolute counter, wrapping every 128 counts — about
+**64 ms** at 33 RPM. Turning it into motion requires assuming each step is less
+than half the range, so a step of 64+ would be undecidable: +66 forward and −62
+backward are the same byte.
+
+Across all 12,123 deltas in the vendor-driver capture, the **entire** step
+distribution is:
+
+| step (counts) | −1 | +1 | +2 | +3 |
+|---|---|---|---|---|
+| occurrences | 29 | 296 | 11,605 | 193 |
+
+**Maximum step: 3 counts. Steps ≥ 64: zero.** At 1 kHz the platter advances
+about two counts per frame, so reaching the 64-count limit takes roughly **32
+consecutive lost frames**. The counter carries ~20× headroom over the fastest
+motion actually observed, and the ambiguity never fires on a host that keeps up.
+
+The practical consequence is the reverse of what was written here: wrap
+disambiguation, interpolation and gap-filling are not needed, and building them
+treats a symptom of frame loss as a property of the hardware.
+
+Serato's [known issue](https://support.serato.com/hc/en-us/articles/203682530)
+on V7/NS7/NS7II track skipping was previously cited here as corroboration that
+the ambiguity is inherent to the encoding. That inference does not survive this
+measurement — whatever Serato is describing, it is not visible in this capture.
 
 ### The 0xE0 timestamp has never been consumed by any host
 

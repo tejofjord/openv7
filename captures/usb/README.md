@@ -15,7 +15,7 @@ Filtering to the **control** traffic — bulk IN `0x83`, bulk OUT `0x04`, and EP
 control transfers — gives **2.0 MB total**, a 150× reduction with nothing of
 value lost:
 
-```
+```sh
 tshark -r <original>.pcap \
   -Y 'usb.endpoint_address==0x83 || usb.endpoint_address==0x04 || usb.transfer_type==0x02 || usb.transfer_type==0xfe' \
   -w <name>-control.pcap
@@ -38,7 +38,7 @@ re-capturable with the `tools/win/capture-*.ps1` scripts.
 `platter-frames.tsv` is the extracted `0x83` payload stream from the idle
 capture's motor phase — timestamp, length, hex — produced by:
 
-```
+```sh
 tshark -r idle-USBPcap1.pcap -Y 'usb.endpoint_address==0x83 && usb.data_len>0' \
        -T fields -e frame.time_relative -e usb.data_len -e usb.capdata
 ```

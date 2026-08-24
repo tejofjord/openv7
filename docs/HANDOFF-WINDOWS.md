@@ -41,7 +41,7 @@ queue depth 1–16, keepalives on/off, logging — were the wrong ones.
 
 ### 2. VirtualDJ commands the motor on Windows and not on macOS
 
-```
+```text
 b0 41 7f   x3    MOTOR instant start
 b0 42 7f   x2    MOTOR instant stop
 ```
@@ -69,7 +69,7 @@ a 500 ms period, and nothing else.
 **MIDI messages span the 42-byte frames.** 11.7 % of frames begin with a
 leftover data byte from the previous frame's message:
 
-```
+```text
 frame N     b0 00 16   e0 4d             fd..fd 00     <- pitch-bend MSB absent
 frame N+1   0b         b0 00 18  e0 02   fd..fd 00     <- it is here
 ```
@@ -116,21 +116,36 @@ Over the same 12,161 captured frames:
 
 In order of value.
 
-1. **Find the frame loss.** The device delivers 1000/s; the bridge sees 936/s.
-   This is now a bug with a known target rather than a mystery. Instrument the
-   control-IN path and find where the 6.4 % goes.
-2. **Parse the control stream as a byte stream**, not per-frame, if it does not
-   already. One message in six is at stake.
-3. **X2 — replay the captured stream.** `captures/vdj/vdj-inbound-0x83.tsv.gz`
+1. ~~**Find the frame loss.**~~ ✅ **Done — it was not frame loss.** Replaying
+   `platter-frames.tsv` through OpenV7's own `midi_feed` reproduces the shortfall
+   from a capture with *zero* USB loss: 11,416 positions against 12,124, and 33
+   fabricated position jumps against none. The bridge was not dropping USB
+   frames; the parser was discarding every message that straddled a frame
+   boundary. See PROTOCOL.md.
+2. ~~**Parse the control stream as a byte stream.**~~ ✅ **Done.** `midi_feed`
+   cleared its state after each padding run; it no longer does. On the reference
+   corpus the result is byte-identical to stripping filler and terminator by
+   position and parsing the concatenation. `make corpus` grades the splitter
+   against all 12,161 frames in CI, because the hand-written vectors all used
+   self-contained frames and passed either way.
+   **Still open:** 5.8% is most of the 6.4% shortfall but not provably all of
+   it. Confirm on hardware — frames received (`g_ctrl_bytes` / 42) against
+   messages emitted.
+3. **X2 — replay the captured stream.** ← **the next real experiment** `captures/vdj/vdj-inbound-0x83.tsv.gz`
    holds 68,678 inbound frames with arrival timestamps, taken while the working
    system played and scratched. Replay it into CoreMIDI verbatim and listen:
    - clean → our transport is exonerated, the encoding is the fault
    - hiccups → the fault is downstream of the bytes, and the search moves to
      CoreMIDI delivery or VirtualDJ's macOS build
-4. **Make VDJ command the motor** — or establish why the macOS definition does
-   not. Compare `captures/vdj/controllers-windows.dat` byte-for-byte against the
-   macOS copy; it is opaque binary with no readable strings, so a diff is the
-   only available test.
+4. **Make VDJ command the motor.** The definition diff is done and it came back
+   **identical** — `sha256 2c9e2dec…` for both `controllers-windows.dat` and the
+   macOS `~/Library/Application Support/VirtualDJ/Devices/controllers.dat`.
+   VirtualDJ ships the *same* V7 definition on both platforms, so this is not a
+   definition difference; it is a **binding** failure. The live candidate is the
+   port name — Windows exposes `Numark V7 MIDI`, our CoreMIDI source is
+   `Numark V7`.
+   ⚠️ Renaming the published source will break any mapping a user already
+   MIDI-learned against `Numark V7`, so decide rename-vs-option before shipping.
 
 ---
 
