@@ -26,6 +26,7 @@
 #include <pthread.h>
 #include <pthread/qos.h>
 #include <sys/resource.h>
+#include <mach/mach_time.h>
 #include <libusb.h>
 #include <CoreMIDI/CoreMIDI.h>
 #include <CoreFoundation/CoreFoundation.h>
@@ -36,12 +37,21 @@
 extern void openv7_prevent_appnap(void);
 
 /* ---- globals ---- */
+/* --replay: feed a recorded frame capture into CoreMIDI instead of the device,
+   so the whole downstream path can be tested with no hardware attached. */
+static const char *g_replay_path;
+static int         g_replay_loop;
+/* --legacy-parse: restore the frame-boundary reset midi_feed used to do, purely
+   so the fixed and broken parsers can be A/B'd from one binary against the same
+   recorded stream. Off by default; nothing but replay should ever set it. */
+static int         g_legacy_parse;
 static libusb_context     *g_ctx;
 static libusb_device_handle *g_dev;
 static MIDIClientRef        g_client;
 static MIDIEndpointRef      g_source;   /* device -> apps */
 static MIDIEndpointRef      g_dest;     /* apps -> device */
 static volatile sig_atomic_t g_quit = 0;
+static int g_stall_exit = 0;   /* exit non-zero so the supervisor relaunches */
 static int g_verbose = 0;
 static int g_learn   = 0;
 static int g_diag    = 0;   /* --diag: print iso streaming rates once a second */
@@ -149,7 +159,9 @@ static void learn_dump(void) {
    count: 16 x 16 packets = 32 ms. With 40-packet URBs the same 16 transfers now
    buy 80 ms, so resilience strictly increases. Latency does not matter while the
    stream is silence; shrink this to ~8 when real PCM starts being written. */
+#ifndef ISO_NXFER
 #define ISO_NXFER  16
+#endif
 
 /* ---- iso-OUT pacing ------------------------------------------------------
    Hold a true 44.1 kHz by carrying the fractional remainder rather than
@@ -197,7 +209,13 @@ static void outq_push(const unsigned char *msg, int len) {
 }
 
 /* ---- small MIDI message splitter (handles running status) ---- */
-struct midi_split { uint8_t status, data[2]; int ndata, need, insysex; };
+struct midi_split { uint8_t status, data[2]; int ndata, need, insysex; int pad; };
+
+/* How many consecutive 0xFD bytes mark the END of a 42-byte frame rather than
+   incidental filler. Real frames carry 35-38 of them; a lone 0xFD between two
+   messages is filler and must stay transparent, which is why this is a run
+   length and not "any 0xFD". */
+#define FRAME_PAD_MIN 8
 /* Length of a complete message INCLUDING its status byte.
 
    System common used to fall into the `default: return 3` below, which is wrong
@@ -227,7 +245,32 @@ static int midi_msg_len(uint8_t status) {
  * arbitrary length. Dropping it is a deliberate limitation; mangling it into
  * fake channel messages, which is what happened before, is a bug. */
 static int midi_feed(struct midi_split *s, uint8_t x, uint8_t out[3]) {
-    if (x == V7_MIDI_IDLE) return 0;
+    if (x == V7_MIDI_IDLE) { if (s->pad < FRAME_PAD_MIN) s->pad++; return 0; }
+    /* End of a frame. The byte after a long 0xFD run is the frame TERMINATOR
+       (0x00 inbound, docs/PROTOCOL.md) -- part of the container, not MIDI.
+       Letting it reach the data-byte path is what fabricated a whole extra
+       message after every 2-byte one, and put a bogus 0x00-LSB timestamp into
+       the platter stream 3.4% of the time.
+
+       The 42-byte frame is a TRANSPORT container, not a message container, so
+       nothing else is reset here. This code used to clear status/ndata as well,
+       on the theory that frames are self-contained and a data byte opening a
+       frame belongs to no previous message. The vendor-driver capture disproves
+       that: 11.7% of frames begin mid-message (1419 of 12161 in
+       captures/usb/platter-frames.tsv). Clearing the parser threw those away --
+       708 of 12124 positions and 711 of 12124 timestamps, 5.8%, and it
+       manufactured 33 position jumps larger than 8 counts where the correct
+       parse has none. Those jumps are the audible ones. Strip the filler and
+       the terminator, keep parsing the byte stream underneath. */
+    if (s->pad >= FRAME_PAD_MIN) {
+        s->pad = 0;
+        /* The bug, kept switchable for A/B only -- see --legacy-parse. */
+        if (g_legacy_parse) { s->status = 0; s->ndata = 0; s->insysex = 0; }
+        if (x == 0x00) return 0;             /* swallow the terminator */
+        /* Anything else continues the stream -- a fresh status byte, or the
+           remaining data bytes of a message the previous frame started. */
+    }
+    s->pad = 0;
     if (x >= 0xF8) return 0;                 /* system realtime — ignore, running status survives */
     if (x & 0x80) {
         if (x == 0xF0) { s->insysex = 1; s->status = 0; return 0; }
@@ -264,6 +307,126 @@ static void midi_to_apps(const uint8_t *msg, int len) {
     if (p) MIDIReceived(g_source, pl);
 }
 
+/* ---- --replay: play a recorded capture into CoreMIDI, with no device ------
+
+   The point is to hold the BYTE STREAM constant while everything around it
+   changes. captures/vdj/vdj-inbound-0x83.tsv.gz is 68,678 inbound frames with
+   arrival timestamps, taken off the wire while the stock Windows driver fed
+   VirtualDJ and the audio was clean. Replaying it here puts that exact stream
+   through our parser, our CoreMIDI source and VirtualDJ's macOS build, so
+   whatever remains is downstream of the bytes.
+
+   Paired with --legacy-parse this is a controlled A/B: same recording, same
+   timing, one variable. If the broken parser hiccups and the fixed one does
+   not, the parser was the audible fault and no hardware was needed to show it.
+
+   Timing uses mach_wait_until. nanosleep resolves to the scheduler quantum,
+   which was measured at 140-907 us of error on this machine -- most of a frame
+   period at 1 kHz, so it would smear the very cadence being reproduced. */
+static int  g_diag_jog;                              /* defined below */
+static int  forward_to_apps(const uint8_t *msg);      /* defined below */
+static void jog_stat(const uint8_t *m, int n);       /* defined below */
+
+static uint64_t g_mach_num = 1, g_mach_den = 1;
+static uint64_t us_to_mach(uint64_t us) {
+    return us * 1000ULL * g_mach_den / g_mach_num;
+}
+
+struct rframe { double t; uint8_t b[42]; int n; };
+
+static int replay_run(const char *path) {
+    size_t len = strlen(path);
+    int gz = len > 3 && !strcmp(path + len - 3, ".gz");
+    FILE *f;
+    if (gz) {
+        char cmd[1024];
+        snprintf(cmd, sizeof cmd, "gzip -dc '%s'", path);
+        f = popen(cmd, "r");
+    } else f = fopen(path, "r");
+    if (!f) { fprintf(stderr, "OpenV7: cannot open %s\n", path); return 2; }
+
+    /* Read the whole capture before playing any of it: file I/O during
+       playback would inject exactly the jitter this is trying to measure. */
+    size_t cap = 4096, nfr = 0;
+    struct rframe *fr = malloc(cap * sizeof *fr);
+    if (!fr) { fprintf(stderr, "OpenV7: out of memory\n"); return 5; }
+    char line[512];
+    while (fgets(line, sizeof line, f)) {
+        char *p1 = strchr(line, '\t'); if (!p1) continue;
+        char *p2 = strchr(p1 + 1, '\t'); if (!p2) continue;
+        int n = atoi(p1 + 1);
+        if (n <= 0 || n > 42) continue;
+        if (nfr == cap) {
+            cap *= 2;
+            struct rframe *t = realloc(fr, cap * sizeof *fr);
+            if (!t) { free(fr); fprintf(stderr, "OpenV7: out of memory\n"); return 5; }
+            fr = t;
+        }
+        fr[nfr].t = atof(line);
+        fr[nfr].n = n;
+        for (int i = 0; i < n; i++) { unsigned v; sscanf(p2 + 1 + 2*i, "%2x", &v); fr[nfr].b[i] = (uint8_t)v; }
+        nfr++;
+    }
+    if (gz) pclose(f); else fclose(f);
+    if (!nfr) { fprintf(stderr, "OpenV7: %s holds no frames\n", path); free(fr); return 2; }
+
+    double span = fr[nfr-1].t - fr[0].t;
+    fprintf(stderr, "OpenV7: replaying %zu frames over %.1fs from %s%s\n",
+            nfr, span, path, g_legacy_parse ? "  [LEGACY PARSER]" : "");
+
+    mach_timebase_info_data_t tb; mach_timebase_info(&tb);
+    g_mach_num = tb.numer; g_mach_den = tb.denom;
+
+    long msgs = 0, pass = 0;
+    do {
+        struct midi_split ms = {0};
+        uint64_t t0 = mach_absolute_time();
+        double base = fr[0].t;
+        for (size_t i = 0; i < nfr && !g_quit; i++) {
+            uint64_t due = t0 + us_to_mach((uint64_t)((fr[i].t - base) * 1e6));
+            if (due > mach_absolute_time()) mach_wait_until(due);
+            uint8_t out[3];
+            for (int j = 0; j < fr[i].n; j++) {
+                int n = midi_feed(&ms, fr[i].b[j], out);
+                if (n <= 0) continue;
+                msgs++;
+                if (!forward_to_apps(out)) continue;
+                midi_to_apps(out, n);
+                if (g_diag_jog) jog_stat(out, n);
+                if (g_verbose) {
+                    fprintf(stderr, "  in  ");
+                    for (int k = 0; k < n; k++) fprintf(stderr, "%02x ", out[k]);
+                    fprintf(stderr, "\n");
+                }
+            }
+        }
+        pass++;
+        fprintf(stderr, "OpenV7: pass %ld done — %ld messages\n", pass, msgs);
+    } while (g_replay_loop && !g_quit);
+
+    free(fr);
+    return 0;
+}
+
+/* Batched variant: build one packet list across a whole transfer, flush once. */
+static Byte g_pkt_buf[4096];
+static MIDIPacketList *g_pl;
+static MIDIPacket *g_pkt;
+static int g_pkt_n;
+
+static void batch_begin(void) {
+    g_pl = (MIDIPacketList *)g_pkt_buf;
+    g_pkt = MIDIPacketListInit(g_pl);
+    g_pkt_n = 0;
+}
+static void batch_add(const uint8_t *msg, int len) {
+    MIDIPacket *p = MIDIPacketListAdd(g_pl, sizeof g_pkt_buf, g_pkt, 0, len, msg);
+    if (!p) { if (g_pkt_n) MIDIReceived(g_source, g_pl); batch_begin();   /* full: flush and restart */
+              p = MIDIPacketListAdd(g_pl, sizeof g_pkt_buf, g_pkt, 0, len, msg); }
+    if (p) { g_pkt = p; g_pkt_n++; }
+}
+static void batch_flush(void) { if (g_pkt_n) MIDIReceived(g_source, g_pl); g_pkt_n = 0; }
+
 /* ---- CoreMIDI: receive from apps -> queue for the device ---- */
 static void dest_read(const MIDIPacketList *pl, void *refCon, void *srcRefCon) {
     (void)refCon; (void)srcRefCon;
@@ -272,7 +435,18 @@ static void dest_read(const MIDIPacketList *pl, void *refCon, void *srcRefCon) {
         struct midi_split s = {0}; uint8_t out[3];
         for (unsigned j = 0; j < p->length; j++) {
             int n = midi_feed(&s, p->data[j], out);
-            if (n > 0) outq_push(out, n);
+            if (n > 0) {
+                outq_push(out, n);
+                /* App -> device was completely unlogged, so "the DJ app pressed
+                   play and the platter did not spin" had no evidence either way:
+                   nothing showed whether the app had sent a motor command at
+                   all. Inbound has had -v since the beginning; this is its twin. */
+                if (g_verbose) {
+                    fprintf(stderr, "  out ");
+                    for (int k = 0; k < n; k++) fprintf(stderr, "%02x ", out[k]);
+                    fprintf(stderr, "%s\n", ctrl_label(out[0], out[1]));
+                }
+            }
         }
         p = MIDIPacketNext(p);
     }
@@ -388,7 +562,34 @@ static void ploytec_rearm(void) {
 #define CLEAR_MAX 8
 static unsigned char g_clear_q[CLEAR_MAX];
 static int g_nclear = 0;
+static long now_ms(void);
+/* Stall detection, third attempt -- the first two failed for instructive reasons.
+   A continuous run of submit failures never materialises (clear_halt "succeeds",
+   the next submit succeeds, the transfer then completes stalled). And counting
+   stalls alone needs a threshold, which needs the rate: measured, it is about
+   TWO per second, so any window/threshold pair tuned for a fast failure never
+   fires.
+
+   What is unambiguous is the CONJUNCTION: stalls are occurring AND no control
+   data has arrived for several seconds. Neither half alone is safe -- an idle V7
+   legitimately sends nothing for minutes (docs/PROTOCOL.md), so silence by
+   itself must never trigger a reset. */
+static long g_pipe_win_ms;             /* start of the current stall window */
+static int  g_pipe_hits;               /* stalls seen inside it */
+static long g_last_data_ms;            /* last control-IN completion WITH data */
+#define STALL_WINDOW_MS  5000
+#define STALL_HITS       3             /* more than a one-off blip */
+#define STALL_QUIET_MS   4000          /* ...and nothing has arrived meanwhile */
+
 static void clear_halt_later(unsigned char ep) {
+    /* Count EVERY stall here, whichever path found it. Counting submit failures
+       alone missed the fault entirely: a stalled pipe often submits fine and
+       then COMPLETES with LIBUSB_TRANSFER_STALL, so arm_bulk saw nothing wrong
+       while no data moved at all. Both paths call this function. */
+    long now = now_ms();
+    if (!g_pipe_win_ms || now - g_pipe_win_ms > STALL_WINDOW_MS) { g_pipe_win_ms = now; g_pipe_hits = 0; }
+    g_pipe_hits++;
+
     for (int i = 0; i < g_nclear; i++) if (g_clear_q[i] == ep) return;   /* already queued */
     if (g_nclear < CLEAR_MAX) g_clear_q[g_nclear++] = ep;
 }
@@ -402,7 +603,11 @@ static void clear_halt_later(unsigned char ep) {
    whose bounce bursts hard, produced "90 00 1c" in the middle of a run of
    "90 1c 7f"/"90 1c 00" -- the pairing slipped because one 1c went missing.
    Keeping several transfers queued means the endpoint is always armed. */
+/* Overridable at build time so the queue depth can be A/B tested against the
+   jog-timestamp ordering measurement (tools: --diag-jog). */
+#ifndef CTRL_IN_NXFER
 #define CTRL_IN_NXFER 4
+#endif
 static struct libusb_transfer *g_t_in[CTRL_IN_NXFER];
 
 /* A libusb error that means "this handle is dead", not "try again".
@@ -448,6 +653,32 @@ static struct libusb_transfer *g_t_aux = NULL;
 static int g_in_live[CTRL_IN_NXFER];
 static int g_aux_live = 0;
 static long g_ctrl_bytes = 0;          /* control-IN traffic, for --diag */
+
+/* Stall detection. A stalled control-IN pipe used to be permanent: arm_bulk
+   retries forever, clear_halt reports success without fixing anything, and the
+   process stays up -- so the menu bar keeps saying "connected" while not one
+   MIDI byte flows. Seen 323 times in a single launch.
+
+   The signal is a CONTINUOUS run of PIPE submit failures, not silence: an idle
+   V7 legitimately sends nothing at all (docs/PROTOCOL.md -- 10 minutes of idle
+   produced zero messages), so "no data" must never trigger recovery.
+
+   Recovery is a USB port reset followed by a FRESH process. src/main.c used to
+   warn that libusb_reset_device leaves the platter encoder un-armed; measured
+   again on a wedged device, a reset plus a new bring-up restored it completely
+   -- 0 PIPE errors and ~907 platter frames/s. The reset invalidates this
+   handle, so exit and let the supervisor relaunch rather than carrying on. */
+/* Counted over a WINDOW, not as an unbroken run. The first version of this
+   tracked a continuous streak and never once fired, because a stalled pipe does
+   not fail cleanly: clear_halt reports success, the next submit succeeds, the
+   transfer then COMPLETES stalled, and round it goes. A submit succeeds inside
+   every couple of seconds, which reset the streak forever. Rate is the honest
+   signal -- a healthy bridge produces zero of these. */
+
+static long now_ms(void) {
+    struct timeval tv; gettimeofday(&tv, NULL);
+    return tv.tv_sec * 1000L + tv.tv_usec / 1000;
+}
 /* Last-complained-at, one clock PER ENDPOINT. A single shared static meant a
    persistently failing pipe griped once a second and silenced every OTHER
    pipe's message for that same second -- so a second endpoint failing at the
@@ -497,16 +728,147 @@ static void LIBUSB_CALL out_cb(struct libusb_transfer *t) {
     libusb_free_transfer(t);
 }
 static struct midi_split g_in;                        /* device-side parser state */
+/* ---- --diag-jog: is the platter's timestamp stream actually smooth? --------
+   PURELY OBSERVATIONAL. Nothing here changes a byte that reaches the app; it
+   exists to settle a question that cannot be settled by reading code.
+
+   The platter sends a position CC paired 1:1 with an 0xE0 pitch-bend carrying a
+   timestamp off a 2,822,400 Hz clock (44100 x 64 -- see docs/PROTOCOL.md). A
+   host that scratches from this stream computes velocity as position-delta over
+   TIMESTAMP-delta, so three separate things can each make that velocity noisy,
+   and they call for completely different fixes:
+
+     1. the device's own clock is uneven      -> dt spread is wide
+     2. we are dropping or reordering frames  -> e0/s and pos/s stop matching
+     3. the device is fine but WE deliver in  -> dt spread is tight while the
+        clumps                                   host inter-arrival spread is wide
+
+   So measure all three at once: the device's timestamp delta, the pairing
+   count, and the wall-clock gap between arrivals as seen from this process. */
+static int g_diag_jog = 0;
+
+/* The platter's 0xE0 timestamps ARE forwarded, and must be: VirtualDJ's native
+   V7 mapping drives the jog from them, not from the position CC. Proven live --
+   suppressing them silences the jog completely while CC 0x00 keeps streaming at
+   ~968/s.
+
+   They were briefly suppressed here on the theory that a DJ app was binding
+   them as literal pitch bend. That theory was wrong, and the experiment that
+   appeared to confirm it was confounded: suppressing them required restarting
+   the bridge, which tore down the CoreMIDI endpoint, and an app that has lost
+   its controller sounds exactly like an app whose jitter is fixed.
+
+   The real fault was ours and upstream of all of this -- see FRAME_PAD_MIN in
+   midi_feed. The frame terminator was being parsed as MIDI, fabricating a
+   bogus-timestamp 0xE0 message 3.4% of the time (chance: 0.78%), and each one
+   is a wrong jog velocity. With that fixed the rate is 0.79% and backwards
+   timestamp deltas fell from 1.83% to 0.36%.
+
+   --no-timestamps still suppresses them, because it is the fastest way to tell
+   a jog fault from a timestamp fault on any app. */
+static int g_send_timestamps = 1;
+
+/* SIGUSR1 toggles the filter AT RUNTIME. This exists because testing it by
+   restarting the bridge is not a valid experiment: a restart tears down the
+   CoreMIDI source, and a DJ app that loses its controller mid-session goes
+   quiet whether or not the filter did anything. The first attempt at this A/B
+   produced "the audio is perfect now" from an app that had simply stopped
+   receiving. Toggling in place keeps the endpoint, the app's binding and the
+   audio stream all untouched, so the only thing that changes is the one thing
+   under test.
+     kill -USR1 $(pgrep -f openv7) */
+static volatile sig_atomic_t g_toggle_ts = 0;
+static void on_sigusr1(int sig) { (void)sig; g_toggle_ts = 1; }
+
+/* Deliver every message decoded from ONE USB transfer in a SINGLE
+   MIDIPacketList, instead of one list per message.
+
+   On the wire the platter's position and its 0xE0 timestamp are two messages
+   inside the SAME 42-byte frame -- they are one event, split across two MIDI
+   messages by the protocol. midi_to_apps has always sent one MIDIPacketList per
+   message, so that atomic pair reaches the app as two separate deliveries. A
+   host that pairs a position with the timestamp it arrived WITH would mis-pair
+   them, and a mis-paired timestamp is a wrong velocity, which in vinyl mode is
+   a wrong playback speed.
+
+   SIGUSR2 toggles it, for the same reason SIGUSR1 exists: the comparison is
+   only valid if the app never loses the endpoint.
+     kill -USR2 $(pgrep -f openv7) */
+static int g_batch_frame = 0;
+static volatile sig_atomic_t g_toggle_batch = 0;
+static void on_sigusr2(int sig) { (void)sig; g_toggle_batch = 1; }
+
+/* Should this decoded message go to CoreMIDI at all? Split out so it is
+   testable: the filter is a claim about the protocol, and claims get tests. */
+static int forward_to_apps(const uint8_t *msg) {
+    if (!g_send_timestamps && (msg[0] & 0xF0) == 0xE0) return 0;   /* platter timestamp */
+    return 1;
+}
+
+static long     g_jog_n, g_jog_pos_n;          /* 0xE0s and paired position CCs  */
+static long     g_jog_gaps;                    /* position steps > 8 counts = lost frames */
+static int      g_jog_pos_have; static uint8_t g_jog_pos_prev;
+static int      g_jog_have;                    /* seen a first 0xE0 to diff from */
+static unsigned g_jog_prev;                    /* previous 14-bit timestamp      */
+static long     g_jog_dsum; static unsigned g_jog_dmin, g_jog_dmax;   /* clock units */
+static long     g_jog_hsum; static long g_jog_hmin, g_jog_hmax;       /* host us     */
+static long     g_jog_hprev;
+
+static long now_us(void) {
+    struct timeval tv; gettimeofday(&tv, NULL);
+    return tv.tv_sec * 1000000L + tv.tv_usec;
+}
+
+static void jog_stat(const uint8_t *m, int n) {
+    if (n < 3) return;
+    /* Position CCs: 0x00 is deck A, 0x02 deck B (docs/CONTROL-MAP.md). Counted
+       only to check the 1:1 pairing survives our own parser. */
+    if ((m[0] & 0xF0) == 0xB0 && (m[1] == 0x00 || m[1] == 0x02)) {
+        /* The platter counter steps +2 per frame at 33 RPM. A step of 9..119 is
+           several frames that never arrived -- and on a motorized deck the
+           platter IS the transport, so each one is a position discontinuity the
+           host hears as a jump. Counted here to sit on the same line as the iso
+           rates, because the suspicion is that the two are related: the chip
+           only reports controls while the audio clock we generate is running. */
+        if (g_jog_pos_have) {
+            uint8_t d = (uint8_t)((m[2] - g_jog_pos_prev) & 0x7F);
+            if (d > 8 && d < 120) g_jog_gaps++;
+        }
+        g_jog_pos_prev = m[2]; g_jog_pos_have = 1;
+        g_jog_pos_n++; return;
+    }
+    if ((m[0] & 0xF0) != 0xE0) return;
+
+    unsigned v = (unsigned)m[1] | ((unsigned)m[2] << 7);   /* 14-bit, LSB first */
+    long h = now_us();
+    if (g_jog_have) {
+        unsigned d = (v - g_jog_prev) & 0x3FFF;   /* the counter wraps every 16384 */
+        long hd = h - g_jog_hprev;
+        if (g_jog_n == 0) { g_jog_dmin = g_jog_dmax = d; g_jog_hmin = g_jog_hmax = hd; }
+        else {
+            if (d  < g_jog_dmin) g_jog_dmin = d;   if (d  > g_jog_dmax) g_jog_dmax = d;
+            if (hd < g_jog_hmin) g_jog_hmin = hd;  if (hd > g_jog_hmax) g_jog_hmax = hd;
+        }
+        g_jog_dsum += d; g_jog_hsum += hd; g_jog_n++;
+    }
+    g_jog_prev = v; g_jog_hprev = h; g_jog_have = 1;
+}
+
 static void LIBUSB_CALL ctrl_in_cb(struct libusb_transfer *t) {
     int idx = (int)(intptr_t)t->user_data;
     g_in_live[idx] = 0;                                /* no longer in flight */
     if (t->status == LIBUSB_TRANSFER_COMPLETED) {
         g_ctrl_bytes += t->actual_length;
+        if (t->actual_length > 0) g_last_data_ms = now_ms();   /* the pipe is genuinely alive */
         uint8_t out[3];
+        if (g_batch_frame) batch_begin();
         for (int i = 0; i < t->actual_length; i++) {
             int n = midi_feed(&g_in, t->buffer[i], out);
             if (n > 0) {
-                midi_to_apps(out, n);
+                if (forward_to_apps(out)) {
+                    if (g_batch_frame) batch_add(out, n); else midi_to_apps(out, n);
+                }
+                if (g_diag_jog) jog_stat(out, n);
                 if (g_learn) learn_note(out[0], out[1], n == 3 ? out[2] : 0);
                 if (g_verbose) {
                     fprintf(stderr, "  in  ");
@@ -515,6 +877,7 @@ static void LIBUSB_CALL ctrl_in_cb(struct libusb_transfer *t) {
                 }
             }
         }
+        if (g_batch_frame) batch_flush();
     }
     if (t->status == LIBUSB_TRANSFER_NO_DEVICE) { g_quit = 1; return; }
     if (t->status == LIBUSB_TRANSFER_STALL) clear_halt_later(V7_EP_CTRL_IN);
@@ -591,19 +954,48 @@ int main(int argc, char **argv) {
         if (!strcmp(argv[i], "-v") || !strcmp(argv[i], "--verbose")) g_verbose = 1;
         else if (!strcmp(argv[i], "--learn")) g_learn = 1;
         else if (!strcmp(argv[i], "--diag")) g_diag = 1;
+        else if (!strcmp(argv[i], "--diag-jog")) g_diag_jog = 1;
+        else if (!strcmp(argv[i], "--no-timestamps")) g_send_timestamps = 0;
         else if (!strcmp(argv[i], "--no-keepalive")) g_keepalive = 0;
         else if (!strcmp(argv[i], "--supervised")) g_supervised = 1;
+        else if (!strcmp(argv[i], "--replay")) {
+            if (i + 1 >= argc) { fprintf(stderr, "OpenV7: --replay needs a capture file\n"); return 1; }
+            g_replay_path = argv[++i];
+        }
+        else if (!strcmp(argv[i], "--replay-loop")) g_replay_loop = 1;
+        else if (!strcmp(argv[i], "--legacy-parse")) g_legacy_parse = 1;
         else if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help")) {
             printf("OpenV7 — Numark V7 userspace driver\n"
-                   "usage: openv7 [-v|--verbose] [--learn] [--diag]\n"
+                   "usage: openv7 [-v|--verbose] [--learn] [--diag] [--diag-jog]\n"
+                   "       [--no-timestamps] [--no-keepalive]\n"
+                   "       [--replay FILE [--replay-loop] [--legacy-parse]]\n"
                    "  -v        print decoded MIDI as it arrives\n"
                    "  --learn   catalog each control once (touch every control, Ctrl-C for the map)\n"
                    "  --diag    print isochronous stream health once a second (~200/~62 = healthy)\n"
+                   "  --no-timestamps\n"
+                   "            suppress the platter's 0xE0 timestamp messages. Diagnostic:\n"
+                   "            VirtualDJ drives the jog FROM them, so this silences the jog\n"
+                   "            and tells a jog fault apart from a timestamp fault.\n"
+                   "  --diag-jog\n"
+                   "            print platter timestamp-clock health once a second: whether the\n"
+                   "            device's 0xE0 clock is smooth, whether position/timestamp stay\n"
+                   "            paired 1:1, and whether WE deliver them evenly. Observational.\n"
                    "  --no-keepalive\n"
                    "            disable the control-stream keepalives (25 ms 0xFD frame on bulk\n"
                    "            0x04 + 2 s EP0 re-arm). They are ON by default: without them the\n"
                    "            control stream has been seen to deliver nothing at all from\n"
                    "            launch. Only for A/B testing that fault.\n"
+                   "  --replay FILE\n"
+                   "            play a recorded frame capture into CoreMIDI instead of opening\n"
+                   "            the device. Needs no hardware. FILE is timestamp/len/hex TSV,\n"
+                   "            .gz accepted — see captures/vdj/vdj-inbound-0x83.tsv.gz, which\n"
+                   "            was taken while the stock Windows driver fed VirtualDJ cleanly.\n"
+                   "  --replay-loop\n"
+                   "            repeat the capture until interrupted\n"
+                   "  --legacy-parse\n"
+                   "            restore the frame-boundary reset midi_feed used to do, which\n"
+                   "            discarded every message spanning two frames (5.8%% of them).\n"
+                   "            For A/B against --replay only: same recording, one variable.\n"
                    "  --supervised\n"
                    "            exit when the launching parent process goes away, instead of\n"
                    "            lingering as an orphan that holds the USB interfaces and blocks\n"
@@ -616,6 +1008,8 @@ int main(int argc, char **argv) {
 
     signal(SIGINT, on_sigint);
     signal(SIGTERM, on_sigint);
+    signal(SIGUSR1, on_sigusr1);
+    signal(SIGUSR2, on_sigusr2);
     g_parent_pid = getppid();
 
     /* Clear any inherited background/throttled scheduling. A menu-bar app's
@@ -630,12 +1024,30 @@ int main(int argc, char **argv) {
        the stream is healthy without it, but it costs nothing to keep. */
     openv7_prevent_appnap();
 
+    /* --replay needs the CoreMIDI half of the bridge and nothing else: no
+       device, no handshake, no iso ring. Everything downstream of the bytes is
+       still exercised, which is the whole point. */
+    if (g_replay_path) {
+        MIDIClientCreate(CFSTR("OpenV7"), NULL, NULL, &g_client);
+        MIDISourceCreate(g_client, CFSTR("Numark V7"), &g_source);
+        MIDIDestinationCreate(g_client, CFSTR("Numark V7"), dest_read, NULL, &g_dest);
+        fprintf(stderr, "OpenV7: CoreMIDI device \"Numark V7\" is live (replay; no device attached).\n");
+        int rc = replay_run(g_replay_path);
+        MIDIEndpointDispose(g_source);
+        MIDIEndpointDispose(g_dest);
+        MIDIClientDispose(g_client);
+        return rc;
+    }
+
     if (libusb_init(&g_ctx) < 0) { fprintf(stderr, "libusb init failed\n"); return 1; }
     g_dev = libusb_open_device_with_vid_pid(g_ctx, V7_VID, V7_PID);
     if (!g_dev) { fprintf(stderr, "Numark V7 not found (is it plugged in and powered on?)\n"); return 2; }
-    /* DO NOT call libusb_reset_device() here. A USB port reset re-enumerates the
-       device but leaves the platter-encoder subsystem un-armed: the control
-       stream still emits its idle heartbeat, yet jog/platter frames never come.
+    /* DO NOT call libusb_reset_device() here -- on the bring-up path. (The stall
+       recovery below does reset, deliberately, as a last resort.) Re-measured
+       2026-08-24 on a wedged deck: a reset followed by a FRESH process does
+       restore the platter encoder, buttons and faders, contrary to what this
+       comment used to claim. What it does NOT restore is the MOTOR, which stays
+       deaf to every start command until the deck is power-cycled.
        Proven via an A/B test on real hardware — motor-spin with a fresh bring-up
        streamed 315 encoder frames; the identical bring-up preceded by
        reset_device streamed 1. The device is instead kept clean across sessions
@@ -725,14 +1137,68 @@ int main(int argc, char **argv) {
         fprintf(stderr, "OpenV7: LEARN mode — touch every control once, then Ctrl-C for the map.\n");
     else
         fprintf(stderr, "OpenV7: running. Select \"Numark V7\" in your DJ app. Ctrl-C to stop.\n");
+    g_last_data_ms = now_ms();
 
     long diag_o0 = 0, diag_i0 = 0; time_t diag_t = time(NULL), rearm_t = time(NULL);
+    time_t jog_t = time(NULL);
+    /* Wall-clock seconds tick at an arbitrary point relative to startup, so the
+       first --diag-jog window is a partial second. The implied-clock figure is
+       accumulated device units divided by elapsed time, so it has to divide by
+       the window that actually elapsed, not by an assumed 1.0 s -- otherwise the
+       first line reports a fraction of the real clock and reads like a fault. */
+    long jog_us = now_us();
     unsigned char idle_frame[V7_OUT_FRAME_LEN]; memset(idle_frame, V7_MIDI_IDLE, V7_OUT_FRAME_LEN);
     struct timeval tvn; gettimeofday(&tvn, NULL); long ka04_ms = tvn.tv_sec*1000 + tvn.tv_usec/1000;
     while (!g_quit) {
         struct timeval tv = { 0, 20000 };
         libusb_handle_events_timeout(g_ctx, &tv);
         clear_halt_drain();     /* stall recovery, deferred out of the callbacks */
+        /* Escalate a pipe that clear_halt cannot fix. Without this the bridge
+           spins on PIPE indefinitely while reporting itself healthy. */
+        /* Expire the window here, not only when the next stall arrives. Without
+           this the count never falls: stalls stop, g_pipe_hits stays at its old
+           value forever, and the first legitimate quiet spell -- a platter that
+           is simply not turning -- looks like the conjunction and resets the
+           device. Observed doing exactly that: "7 pipe stalls in 60412ms" fired
+           on an idle deck and cost the operator motor control. */
+        if (g_pipe_hits && now_ms() - g_pipe_win_ms > STALL_WINDOW_MS) g_pipe_hits = 0;
+
+        if (g_pipe_hits >= STALL_HITS && g_last_data_ms &&
+            now_ms() - g_last_data_ms > STALL_QUIET_MS) {
+            fprintf(stderr, "OpenV7: %d pipe stalls in %ldms and clear-halt did not fix it — "
+                            "resetting the device and restarting.\n",
+                    g_pipe_hits, now_ms() - g_pipe_win_ms);
+            /* A port reset restores the CONTROL path -- encoder, buttons and
+               faders all report again after the fresh bring-up, measured on
+               hardware. It does NOT restore the MOTOR: the deck ignores every
+               documented start command afterwards (instant, soft, and the full
+               stop/latch/RPM/start sequence) until it is power-cycled, while
+               still happily sending button and platter messages.
+
+               That is the real shape of the warning this file used to carry.
+               The warning named the platter encoder, which does come back; the
+               motor is what does not. Resetting is still the right call when the
+               alternative is a control stream that is dead for the rest of the
+               session -- but it is not free, and the operator has to be told. */
+            libusb_reset_device(g_dev);   /* invalidates the handle: exit, do not continue */
+            fprintf(stderr, "OpenV7: control restored. MOTOR control needs a power cycle "
+                            "of the deck -- a USB reset does not re-arm it.\n");
+            g_stall_exit = 1;
+            g_quit = 1;
+        }
+        if (g_toggle_ts) {      /* SIGUSR1: flip the timestamp filter in place */
+            g_toggle_ts = 0;
+            g_send_timestamps = !g_send_timestamps;
+            fprintf(stderr, "OpenV7: platter 0xE0 timestamps -> apps: %s\n",
+                    g_send_timestamps ? "ON (raw protocol)" : "OFF (filtered)");
+        }
+        if (g_toggle_batch) {
+            g_toggle_batch = 0;
+            g_batch_frame = !g_batch_frame;
+            fprintf(stderr, "OpenV7: CoreMIDI packing: %s\n",
+                    g_batch_frame ? "ONE packet list per USB transfer (pair kept together)"
+                                  : "one packet list per message (original)");
+        }
         /* EP0 status re-arm, every 2 s (secondary keepalive) — legacy only. */
         if (g_keepalive) { time_t now = time(NULL);
           if (now - rearm_t >= 2) { ploytec_rearm(); rearm_t = now; } }
@@ -803,6 +1269,38 @@ int main(int argc, char **argv) {
                 diag_o0 = g_isoout_cmpl; diag_i0 = g_isoin_cmpl; diag_t = now;
             }
         }
+        if (g_diag_jog) {
+            time_t now = time(NULL);
+            if (now != jog_t) {
+                double wsecs = (double)(now_us() - jog_us) / 1e6;
+                if (g_jog_n) {
+                    double dmean = (double)g_jog_dsum / g_jog_n;
+                    double hmean = (double)g_jog_hsum / g_jog_n;
+                    fprintf(stderr,
+                        "  [jog] e0/s=%ld pos/s=%ld GAPS=%ld | device dt mean=%.0f min=%u max=%u units"
+                        " | host gap mean=%.0f min=%ld max=%ld us | implied clock %.0f Hz (expect 2822400)\n",
+                        g_jog_n, g_jog_pos_n, g_jog_gaps, dmean, g_jog_dmin, g_jog_dmax,
+                        hmean, g_jog_hmin, g_jog_hmax,
+                        wsecs > 0 ? (double)g_jog_dsum / wsecs : 0.0);
+                } else if (g_jog_pos_n) {
+                    fprintf(stderr, "  [jog] pos/s=%ld but ZERO 0xE0 timestamps — the 1:1 pairing is broken\n",
+                            g_jog_pos_n);
+                } else {
+                    /* Say so explicitly. An empty readout must never be mistaken
+                       for a measurement: spin the platter or the motor to feed it. */
+                    fprintf(stderr, "  [jog] idle — platter not moving, nothing to measure\n");
+                }
+                g_jog_n = g_jog_pos_n = g_jog_gaps = 0; g_jog_dsum = 0; g_jog_hsum = 0;
+                /* Drop the running baselines too, so the first delta of the next
+                   window is measured between two messages INSIDE it. Otherwise a
+                   platter that stops and restarts produces one delta spanning the
+                   whole idle period, and that single sample seeds this window's
+                   min/max -- a host-gap max of several seconds, reported as if it
+                   were jitter. Costs one sample per second out of ~1000. */
+                g_jog_have = g_jog_pos_have = 0;
+                jog_t = now; jog_us = now_us();
+            }
+        }
     }
 
     fprintf(stderr, "\nOpenV7: shutting down.\n");
@@ -826,5 +1324,7 @@ int main(int argc, char **argv) {
     MIDIClientDispose(g_client);
     libusb_close(g_dev);
     libusb_exit(g_ctx);
-    return 0;
+    /* Non-zero after a stall reset so the supervising app relaunches us into a
+       full fresh bring-up, which is what actually clears the fault. */
+    return g_stall_exit ? 3 : 0;
 }

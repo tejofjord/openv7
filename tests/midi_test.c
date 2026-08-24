@@ -74,6 +74,99 @@ int main(void) {
     { uint8_t i[]={0xF3,0x04,0x05}, w[]={0xF3,0x04};
       expect("no running status after sys-common", i,3, w,2); }
 
+    puts("  -- real 42-byte inbound frames (docs/PROTOCOL.md) --");
+    /* The frame the platter actually puts on the wire, twice in a row:
+         B0 00 7E | E0 71 75 | FD x35 | 00
+       Two MIDI messages, 35 bytes of 0xFD filler, then a 0x00 TERMINATOR.
+       Positions step 7E -> 00 between frames (+2 counts/ms at 33 1/3 RPM).
+
+       The terminator matters: midi_feed skips only 0xFD and bytes >= 0xF8, so
+       0x00 reaches the data-byte path and is absorbed as the first data byte of
+       a running-status message. This asserts the absorption is harmless here --
+       exactly four messages out, none fabricated, none shifted. */
+    { uint8_t i[84], w[] = {0xB0,0x00,0x7E, 0xE0,0x71,0x75,
+                            0xB0,0x00,0x00, 0xE0,0x1C,0x75};
+      int k = 0;
+      i[k++]=0xB0; i[k++]=0x00; i[k++]=0x7E; i[k++]=0xE0; i[k++]=0x71; i[k++]=0x75;
+      for (int j = 0; j < 35; j++) i[k++] = 0xFD;
+      i[k++]=0x00;
+      i[k++]=0xB0; i[k++]=0x00; i[k++]=0x00; i[k++]=0xE0; i[k++]=0x1C; i[k++]=0x75;
+      for (int j = 0; j < 35; j++) i[k++] = 0xFD;
+      i[k++]=0x00;
+      expect("two platter frames -> 4 messages", i,k, w,12); }
+
+    puts("  -- frame terminator must not fabricate messages --");
+    /* THE JOG-JITTER BUG. A frame is <MIDI> <0xFD padding> <0x00 terminator>.
+       midi_feed skipped only 0xFD, so the terminator reached the data-byte path
+       and, under running status, became data[0] of a NEW message. After a
+       2-byte message that COMPLETES one -- a message the deck never sent.
+
+       Measured live against VirtualDJ: 3.39% of the platter's 0xE0 timestamps
+       carried LSB 0x00 where chance predicts 0.78%, and deltas touching those
+       ran backwards 31% of the time versus 1.8% for clean ones. Each fabricated
+       timestamp is a bogus jog velocity, which vinyl mode turns into audible
+       pitch modulation. */
+    { uint8_t i[42], w[] = {0xC0,0x05};
+      int k = 0;
+      i[k++]=0xC0; i[k++]=0x05;
+      for (int j = 0; j < 39; j++) i[k++] = 0xFD;
+      i[k++]=0x00;
+      expect("2-byte msg + terminator", i,k, w,2); }
+
+    /* Two frames that each hold COMPLETE messages. Note what this does and does
+       not prove: it passes whether or not the parser resets at the boundary,
+       which is exactly why it -- and every other frame test above -- missed the
+       spanning bug. It was originally named "no running status across frames"
+       and asserted that frames are self-contained. They are not; see the
+       spanning tests below. Kept because the terminator handling is still worth
+       pinning down. */
+    { uint8_t i[90], w[] = {0xE0,0x71,0x75, 0xE0,0x1C,0x76};
+      int k = 0;
+      i[k++]=0xE0; i[k++]=0x71; i[k++]=0x75;
+      for (int j = 0; j < 38; j++) i[k++] = 0xFD;
+      i[k++]=0x00;
+      i[k++]=0xE0; i[k++]=0x1C; i[k++]=0x76;
+      for (int j = 0; j < 38; j++) i[k++] = 0xFD;
+      i[k++]=0x00;
+      expect("complete messages in adjacent frames", i,k, w,6); }
+
+    puts("  -- messages SPAN frames (verbatim from the vendor-driver capture) --");
+    /* Every frame test above uses self-contained frames, so all of them pass
+       under a parser that resets state at the boundary AND under one that does
+       not. They encoded the assumption instead of testing it, and the bug hid
+       underneath for a month.
+
+       These two frames are copied byte for byte out of
+       captures/usb/platter-frames.tsv (rows 100-101), captured from the stock
+       vendor driver. The first ENDS mid-message -- B0 00 14 then E0 1C, one
+       data byte short -- and the second OPENS with that missing byte, 0x0B.
+       11.7% of real frames look like this.
+
+       Resetting the parser at the boundary drops the E0 outright and orphans
+       the 0x0B, which is how 5.8% of the platter's timestamps went missing and
+       where the audible position jumps came from. */
+    { uint8_t i[84], w[] = {0xB0,0x00,0x14, 0xE0,0x1C,0x0B, 0xB0,0x00,0x16};
+      int k = 0;
+      i[k++]=0xB0; i[k++]=0x00; i[k++]=0x14; i[k++]=0xE0; i[k++]=0x1C;
+      for (int j = 0; j < 36; j++) i[k++] = 0xFD;
+      i[k++]=0x00;
+      i[k++]=0x0B; i[k++]=0xB0; i[k++]=0x00; i[k++]=0x16; i[k++]=0xE0; i[k++]=0x4D;
+      for (int j = 0; j < 35; j++) i[k++] = 0xFD;
+      i[k++]=0x00;
+      /* E0 4D is left pending on purpose: it completes in the NEXT frame. */
+      expect("message spanning a frame boundary", i,k, w,9); }
+
+    /* Running status must survive the boundary for the same reason. */
+    { uint8_t i[90], w[] = {0xB0,0x00,0x14, 0xB0,0x00,0x16};
+      int k = 0;
+      i[k++]=0xB0; i[k++]=0x00; i[k++]=0x14;
+      for (int j = 0; j < 38; j++) i[k++] = 0xFD;
+      i[k++]=0x00;
+      i[k++]=0x00; i[k++]=0x16;             /* running status, no repeated B0 */
+      for (int j = 0; j < 38; j++) i[k++] = 0xFD;
+      i[k++]=0x00;
+      expect("running status survives a frame", i,k, w,6); }
+
     printf(fails ? "\n%d FAILED\n" : "\nall passed\n", fails);
     return fails != 0;
 }

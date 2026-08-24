@@ -21,6 +21,13 @@ jobs:
       - name: Unit tests
         run: make test
 
+      # Grades the MIDI splitter against 12,161 frames captured from the stock
+      # vendor driver. Hand-written vectors all used self-contained frames, so
+      # they passed both with and without the frame-spanning bug; this corpus is
+      # the device's actual output and cannot be fooled the same way.
+      - name: Corpus regression (vendor-driver capture)
+        run: make corpus
+
       - name: Sanity check
         run: ./openv7 --help
 
@@ -36,6 +43,12 @@ jobs:
         run: |
           ./tools/check-docs-test.sh    # the linter's own fixtures first
           ./tools/check-docs.sh
+
+      # The mapper is a shipped artifact a user copies into VirtualDJ, and
+      # nothing checked it was even well-formed. A stray "--" inside an XML
+      # comment is illegal and slipped in unnoticed while editing one.
+      - name: Validate the VirtualDJ mapper
+        run: xmllint --noout mappers/virtualdj/*.xml
 
       - name: Upload DMG
         uses: actions/upload-artifact@v4

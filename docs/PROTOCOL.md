@@ -399,3 +399,148 @@ the audio packet layout), and what still has to be measured on a V7.
 Note the "no inputs" claim in earlier revisions of this file was wrong — the
 vendor driver exposes a capture endpoint. Channel count for the V7 specifically
 is not established; the Ploytec codec core is 8-channel.
+
+## ✅ Frame framing — MIDI messages span 42-byte frames
+
+**A message begun near the end of one frame continues in the next.** In a real
+capture **11.7 %** of frames start with a leftover data byte belonging to the
+previous frame's message:
+
+```text
+frame N     b0 00 16   e0 4d             fd..fd 00     <- pitch-bend MSB absent
+frame N+1   0b         b0 00 18  e0 02   fd..fd 00     <- it is here
+            ^ that MSB
+```
+
+The 42-byte frame is a **transport container, not a message container**. The
+correct procedure is:
+
+1. take each frame's payload
+2. strip the `0xFD` filler and the trailing `0x00` terminator
+3. concatenate the remainder into one continuous byte stream
+4. run an ordinary MIDI parser over that stream
+
+Parsing frames independently corrupts roughly **one message in six**, and the
+damage lands on the `0xE0` pitch-bend — exactly the value a host uses for jog
+timing. The difference is stark, over the same 12,161 captured frames:
+
+| | per-frame parse | stream parse |
+|---|---|---|
+| Resync errors | — | **0** |
+| `B0 00` value range | 0..**253** (impossible) | 0..**127** ✅ |
+| Delta per message | garbage | mean **1.984**, min −1, max 3 |
+| CC : pitch-bend pairing | broken | **12124 : 12124**, exact |
+
+Reproduce with `tools/win/parse-control-stream.ps1`, whose header documents the
+trap in full.
+
+## The platter stream, as a consumer sees it
+
+Measured on hardware, motor-driven at 33.34 RPM (derived from the counter, not
+assumed — see [HARDWARE.md](HARDWARE.md)).
+
+### ⚠️ Reporting rate IS 1 kHz — corrected
+
+> **This section previously claimed the deck emits ~936 frames/s with ~17 ms
+> gaps, and that this was inherent to the hardware. That is wrong.** A USBPcap
+> capture of the **stock vendor driver** driving the same deck shows otherwise.
+
+Measured from `captures/usb/idle-USBPcap1-control.pcap`, 10 s of steady
+motor-driven rotation, 9,999 intervals:
+
+| | Vendor driver (measured) | OpenV7 on macOS (previously documented) |
+|---|---|---|
+| Frame rate | **exactly 1000/s** — 1000 in every one-second bucket, 11 s running | ~936/s |
+| Max gap | **1.675 ms** | ~17 ms bursts |
+| p50 / p99 / p99.9 | 1.009 / 1.449 / 1.554 ms | — |
+| Gaps ≥ 5 ms | **0** | — |
+| Gaps ≥ 17 ms | **0** | several per second |
+
+**The deck emits one control frame per USB frame, exactly.** It is capable of a
+rock-steady 1 kHz and delivers it when the host keeps up.
+
+So the ~936/s and the 17 ms bursts are **not** device behaviour — they are a
+property of the macOS/OpenV7 path, which is losing roughly **6.4 % of frames in
+bursts**. The earlier note that the rate "did not move for anything on the host
+side" (queue depths 1–16, keepalives, logging) means those were the wrong knobs,
+not that the rate was fixed by the hardware.
+
+This matters because the old framing led somewhere unproductive: if ~17 ms gaps
+were inherent, a host would have to tolerate them, and the search moves to wrap
+handling and interpolation. They are not inherent.
+
+#### ✅ Answered: the bridge was not dropping frames, the parser was discarding messages
+
+Replaying the captured frames through OpenV7's own `midi_feed` reproduces the
+shortfall **with no USB loss at all** — the input is a perfect capture:
+
+| | positions | timestamps | jumps > 8 counts |
+|---|---|---|---|
+| `midi_feed` as shipped | 11,416 | 11,413 | 33 |
+| correct stream parse | **12,124** | **12,124** | **0** |
+
+708 positions and 711 timestamps — **5.8%** — were destroyed inside the parser.
+It cleared `status`/`ndata`/`insysex` after every padding run, treating each
+42-byte frame as self-contained. **11.7% of frames begin mid-message** (1,419 of
+12,161), so every straddling message was thrown away, and the damage falls
+hardest on the `0xE0` a host times the jog from. Fixed by parsing the byte
+stream underneath the frames; `make corpus` now grades the splitter against all
+12,161 frames.
+
+*Not yet closed:* 5.8% is most of the observed 6.4% shortfall but not provably
+all of it. Confirming that requires the deck — compare frames received
+(`g_ctrl_bytes` / 42) against messages emitted.
+
+### ⚠️ The 7-bit counter is ambiguous only if you have already lost frames — corrected
+
+> **This section previously claimed steps of 64+ counts occur ~1.3 times a
+> second, making the counter inherently ambiguous. That measurement was taken
+> from OpenV7's own output, which was dropping 5.8% of messages. It does not
+> describe the device.**
+
+`B0 00 vv` is a **7-bit** absolute counter, wrapping every 128 counts — about
+**64 ms** at 33 RPM. Turning it into motion requires assuming each step is less
+than half the range, so a step of 64+ would be undecidable: +66 forward and −62
+backward are the same byte.
+
+Across all 12,123 deltas in the vendor-driver capture, the **entire** step
+distribution is:
+
+| step (counts) | −1 | +1 | +2 | +3 |
+|---|---|---|---|---|
+| occurrences | 29 | 296 | 11,605 | 193 |
+
+**Maximum step: 3 counts. Steps ≥ 64: zero.** At 1 kHz the platter advances
+about two counts per frame, so reaching the 64-count limit takes roughly **32
+consecutive lost frames**. The counter carries ~20× headroom over the fastest
+motion actually observed, and the ambiguity never fires on a host that keeps up.
+
+The practical consequence is the reverse of what was written here: wrap
+disambiguation, interpolation and gap-filling are not needed, and building them
+treats a symptom of frame loss as a property of the hardware.
+
+Serato's [known issue](https://support.serato.com/hc/en-us/articles/203682530)
+on V7/NS7/NS7II track skipping was previously cited here as corroboration that
+the ambiguity is inherent to the encoding. That inference does not survive this
+measurement — whatever Serato is describing, it is not visible in this capture.
+
+### The 0xE0 timestamp has never been consumed by any host
+
+The timestamp is real and precise — `11.2896 MHz ÷ 4`, median interval 2822
+units against 2825 theoretical, p25/p75 within ±7. Combined with the host clock
+to resolve its 5.8 ms wrap, it yields velocity accurate to **0.1%**, against
+**15%** for velocity timed from message arrival alone (measured offline over
+~12,000 intervals).
+
+No known host uses it:
+
+- **VirtualDJ** has no concept of a device-supplied timestamp in its controller
+  definition format, and computes jog velocity from received values.
+- **Mixxx**'s V7 mapping never got the jog working; the community reported being
+  unable to decipher the pitch-bend values.
+- A working third-party V7 mapping (Bome MIDI Translator → OtsAV) shipped by
+  **discarding** `0xE0` entirely and using position deltas with wrap handling.
+
+Suppressing `0xE0` on this bridge kills the jog in VirtualDJ outright while
+`B0 00` keeps streaming at ~960/s, so VirtualDJ does require the messages —
+what it does with their contents is not established.
