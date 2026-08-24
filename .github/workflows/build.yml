@@ -44,6 +44,12 @@ jobs:
           ./tools/check-docs-test.sh    # the linter's own fixtures first
           ./tools/check-docs.sh
 
+      # The mapper is a shipped artifact a user copies into VirtualDJ, and
+      # nothing checked it was even well-formed. A stray "--" inside an XML
+      # comment is illegal and slipped in unnoticed while editing one.
+      - name: Validate the VirtualDJ mapper
+        run: xmllint --noout mappers/virtualdj/*.xml
+
       - name: Upload DMG
         uses: actions/upload-artifact@v4
         with:

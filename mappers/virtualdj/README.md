@@ -33,10 +33,39 @@ table and how to verify the unconfirmed rows.
 Install it by copying to VirtualDJ's device folder:
 
 ```sh
-cp "Numark_V7.xml" ~/Documents/VirtualDJ/Devices/
+# macOS -- verified on VirtualDJ 2025, Apple Silicon
+cp "Numark_V7.xml" ~/Library/Application\ Support/VirtualDJ/Devices/
+
+# Windows
+copy Numark_V7.xml "%USERPROFILE%\Documents\VirtualDJ\Devices\"
 ```
 
 Then restart VirtualDJ and select **Numark V7** under Controllers.
+
+> Earlier revisions of this file gave `~/Documents/VirtualDJ/Devices/` for
+> macOS. That path does not exist there, so the copy silently went nowhere and
+> the mapping was never actually loaded.
+
+## ⚠️ VirtualDJ ships its own V7 definition, and it wins
+
+VirtualDJ recognises this deck natively — `settings.xml` records
+`Controller: V7` — from definitions packed into
+`Devices/controllers.dat`. That file is **byte-identical on macOS and Windows**
+(`sha256 2c9e2dec…`, compared directly), so both platforms carry the same
+built-in V7 definition, and it takes precedence over anything here.
+
+Two consequences worth knowing before debugging a mapping:
+
+- The built-in definition **consumes `0xE0`**. Suppressing the pitch-bend on the
+  bridge kills the jog outright even though `0xB0 0x00` keeps streaming — while
+  this file does not map `0xE0` at all. If both were in force that could not be
+  true, which is how we know the built-in one is running.
+- On Windows it **commands the motor**, sending `b0 41 7f` on play and
+  `b0 42 7f` on stop (captured from a working system —
+  `captures/vdj/vdj-outbound-0x04.tsv`). On macOS it has never been observed
+  sending `B0 41`/`0x42`/`0x43` in any capture, though it does drive the LEDs.
+  Same definition, different behaviour, so the gap is in how VirtualDJ binds our
+  CoreMIDI source rather than in what it knows about the deck.
 
 > ⚠️ The button/pad/LED rows are cross-referenced, not yet confirmed on a
 > physical unit. If a control misbehaves, please contribute the corrected value

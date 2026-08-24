@@ -107,6 +107,15 @@
          0x49 + 0x69          pitch trim, signed 14-bit two's complement,
                               speed = nominal * (1 + s / 10000)
 
+       NOTE: no motor output is mapped below, only LEDs. A host driving this
+       file will never spin the platter. VirtualDJ's own built-in V7 definition
+       does: captured on Windows it sends 0x41 with value 0x7F on play and 0x42
+       with 0x7F on stop. Our hardware probing used value 0x00 and the motor
+       obeyed both, so the value appears to be ignored, but 0x7F is what the
+       working system sends. The VirtualDJ output verb that should drive these
+       is not known (it has not been read out of controllers.dat, which is
+       packed), so inventing a name here would be a guess.
+
        See ../../docs/CONTROL-MAP.md for the full LED address table. -->
   <map value="0xB0 0x09" name="led play"     deck="1" />
   <map value="0xB0 0x08" name="led cue"      deck="1" />
