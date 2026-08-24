@@ -150,7 +150,9 @@ static void learn_dump(void) {
    count: 16 x 16 packets = 32 ms. With 40-packet URBs the same 16 transfers now
    buy 80 ms, so resilience strictly increases. Latency does not matter while the
    stream is silence; shrink this to ~8 when real PCM starts being written. */
+#ifndef ISO_NXFER
 #define ISO_NXFER  16
+#endif
 
 /* ---- iso-OUT pacing ------------------------------------------------------
    Hold a true 44.1 kHz by carrying the fractional remainder rather than
@@ -682,6 +684,8 @@ static int forward_to_apps(const uint8_t *msg) {
 }
 
 static long     g_jog_n, g_jog_pos_n;          /* 0xE0s and paired position CCs  */
+static long     g_jog_gaps;                    /* position steps > 8 counts = lost frames */
+static int      g_jog_pos_have; static uint8_t g_jog_pos_prev;
 static int      g_jog_have;                    /* seen a first 0xE0 to diff from */
 static unsigned g_jog_prev;                    /* previous 14-bit timestamp      */
 static long     g_jog_dsum; static unsigned g_jog_dmin, g_jog_dmax;   /* clock units */
@@ -697,7 +701,20 @@ static void jog_stat(const uint8_t *m, int n) {
     if (n < 3) return;
     /* Position CCs: 0x00 is deck A, 0x02 deck B (docs/CONTROL-MAP.md). Counted
        only to check the 1:1 pairing survives our own parser. */
-    if ((m[0] & 0xF0) == 0xB0 && (m[1] == 0x00 || m[1] == 0x02)) { g_jog_pos_n++; return; }
+    if ((m[0] & 0xF0) == 0xB0 && (m[1] == 0x00 || m[1] == 0x02)) {
+        /* The platter counter steps +2 per frame at 33 RPM. A step of 9..119 is
+           several frames that never arrived -- and on a motorized deck the
+           platter IS the transport, so each one is a position discontinuity the
+           host hears as a jump. Counted here to sit on the same line as the iso
+           rates, because the suspicion is that the two are related: the chip
+           only reports controls while the audio clock we generate is running. */
+        if (g_jog_pos_have) {
+            uint8_t d = (uint8_t)((m[2] - g_jog_pos_prev) & 0x7F);
+            if (d > 8 && d < 120) g_jog_gaps++;
+        }
+        g_jog_pos_prev = m[2]; g_jog_pos_have = 1;
+        g_jog_pos_n++; return;
+    }
     if ((m[0] & 0xF0) != 0xE0) return;
 
     unsigned v = (unsigned)m[1] | ((unsigned)m[2] << 7);   /* 14-bit, LSB first */
@@ -977,6 +994,14 @@ int main(int argc, char **argv) {
         clear_halt_drain();     /* stall recovery, deferred out of the callbacks */
         /* Escalate a pipe that clear_halt cannot fix. Without this the bridge
            spins on PIPE indefinitely while reporting itself healthy. */
+        /* Expire the window here, not only when the next stall arrives. Without
+           this the count never falls: stalls stop, g_pipe_hits stays at its old
+           value forever, and the first legitimate quiet spell -- a platter that
+           is simply not turning -- looks like the conjunction and resets the
+           device. Observed doing exactly that: "7 pipe stalls in 60412ms" fired
+           on an idle deck and cost the operator motor control. */
+        if (g_pipe_hits && now_ms() - g_pipe_win_ms > STALL_WINDOW_MS) g_pipe_hits = 0;
+
         if (g_pipe_hits >= STALL_HITS && g_last_data_ms &&
             now_ms() - g_last_data_ms > STALL_QUIET_MS) {
             fprintf(stderr, "OpenV7: %d pipe stalls in %ldms and clear-halt did not fix it — "
@@ -1090,9 +1115,9 @@ int main(int argc, char **argv) {
                     double dmean = (double)g_jog_dsum / g_jog_n;
                     double hmean = (double)g_jog_hsum / g_jog_n;
                     fprintf(stderr,
-                        "  [jog] e0/s=%ld pos/s=%ld | device dt mean=%.0f min=%u max=%u units"
+                        "  [jog] e0/s=%ld pos/s=%ld GAPS=%ld | device dt mean=%.0f min=%u max=%u units"
                         " | host gap mean=%.0f min=%ld max=%ld us | implied clock %.0f Hz (expect 2822400)\n",
-                        g_jog_n, g_jog_pos_n, dmean, g_jog_dmin, g_jog_dmax,
+                        g_jog_n, g_jog_pos_n, g_jog_gaps, dmean, g_jog_dmin, g_jog_dmax,
                         hmean, g_jog_hmin, g_jog_hmax, dmean * (double)g_jog_n);
                 } else if (g_jog_pos_n) {
                     fprintf(stderr, "  [jog] pos/s=%ld but ZERO 0xE0 timestamps — the 1:1 pairing is broken\n",
@@ -1102,7 +1127,7 @@ int main(int argc, char **argv) {
                        for a measurement: spin the platter or the motor to feed it. */
                     fprintf(stderr, "  [jog] idle — platter not moving, nothing to measure\n");
                 }
-                g_jog_n = g_jog_pos_n = 0; g_jog_dsum = 0; g_jog_hsum = 0;
+                g_jog_n = g_jog_pos_n = g_jog_gaps = 0; g_jog_dsum = 0; g_jog_hsum = 0;
                 jog_t = now;
             }
         }
