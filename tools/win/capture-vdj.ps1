@@ -116,7 +116,9 @@ Write-Host ''
 try {
     for ($i = $Seconds; $i -gt 0; $i -= 5) {
         Write-Host -NoNewline ("`r  {0,4}s remaining " -f $i)
-        Start-Sleep -Seconds 5
+        # The last iteration must not overshoot: -Seconds 91 steps 91,86..1 and
+        # would sleep 95 s, so the capture runs longer than the operator was told.
+        Start-Sleep -Seconds ([Math]::Min(5, $i))
     }
     Write-Host "`r  done.                    "
 }

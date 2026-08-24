@@ -30,21 +30,29 @@ which:
 See [../../docs/CONTROL-MAP.md](../../docs/CONTROL-MAP.md) for the full address
 table and how to verify the unconfirmed rows.
 
-Install it by copying to VirtualDJ's device folder:
+### ⚠️ Reference only — this file is not known to load
+
+**Do not expect copying this file to change VirtualDJ's behaviour.** VirtualDJ
+carries its own built-in V7 definition (see below) and no procedure for
+overriding it has been tested here. Treat `Numark_V7.xml` as documentation of
+the address map in a format that is convenient to read and diff, and use
+**Option A above** — MIDI-learn — when you actually need a mapping to change.
+
+For the record, VirtualDJ's device folder is:
 
 ```sh
-# macOS -- verified on VirtualDJ 2025, Apple Silicon
-cp "Numark_V7.xml" ~/Library/Application\ Support/VirtualDJ/Devices/
+# macOS -- the folder that exists; NOT ~/Documents/VirtualDJ, which does not
+~/Library/Application\ Support/VirtualDJ/Devices/
 
 # Windows
-copy Numark_V7.xml "%USERPROFILE%\Documents\VirtualDJ\Devices\"
+%USERPROFILE%\Documents\VirtualDJ\Devices\
 ```
 
-Then restart VirtualDJ and select **Numark V7** under Controllers.
-
-> Earlier revisions of this file gave `~/Documents/VirtualDJ/Devices/` for
-> macOS. That path does not exist there, so the copy silently went nowhere and
-> the mapping was never actually loaded.
+Earlier revisions of this file gave the `~/Documents` path for macOS and
+presented the copy as an install step. That path does not exist on macOS, so the
+copy silently went nowhere — and even with the right path, whether a file there
+can displace the packed definition is unverified. Establishing that is the open
+question; until someone does, the instruction would be a guess.
 
 ## ⚠️ VirtualDJ ships its own V7 definition, and it wins
 

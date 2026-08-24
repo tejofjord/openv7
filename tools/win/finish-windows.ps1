@@ -34,7 +34,14 @@ New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
 # with Write-Host, which bypasses the pipeline, so redirecting stdout would
 # capture nothing AND hide the countdowns they need to follow.
 $transcript = Join-Path $OutDir 'finish-windows.log'
-try { Start-Transcript -Path $transcript -Force | Out-Null } catch { }
+# Fail here rather than run the whole suite and discard its output: the script
+# tells the operator at the end that the transcript holds the results, and an
+# empty catch made that claim false whenever the transcript could not start.
+try {
+    Start-Transcript -Path $transcript -Force | Out-Null
+} catch {
+    throw "cannot start the transcript at ${transcript}: $($_.Exception.Message)"
+}
 
 Add-Type -Path (Join-Path $PSScriptRoot 'OpenV7Midi.dll')
 . (Join-Path $PSScriptRoot 'ControlMap.ps1')

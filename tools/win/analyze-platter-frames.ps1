@@ -6,13 +6,25 @@
     tshark -r cap.pcap -Y 'usb.endpoint_address==0x83 && usb.data_len>0' `
            -T fields -e frame.time_relative -e usb.data_len -e usb.capdata
 
-  Each 42-byte control frame from the V7 looks like
+  A 42-byte control frame from the V7 usually looks like
 
     b0 00 6c   e0 70 50   fd fd ... fd   00
     |          |          |              `- terminator
     |          |          `- 0xFD idle filler
     |          `- pitch-bend, LSB then MSB
     `- CC 0x00 (deck A platter position), or 0x02 for deck B
+
+  but the frame is a TRANSPORT container, not a message container, and this
+  script used to assume otherwise. Measured on the reference capture, 11.7% of
+  frames begin part-way through a message that the previous frame started. An
+  earlier version skipped every frame whose first byte was not 0xB0 and read the
+  pitch-bend from fixed offsets 3..5, so it dropped roughly one frame in eight
+  and, on the frames it kept, could read 0xFD filler as a pitch-bend byte.
+
+  The content is therefore parsed from the CONCATENATED stream: strip the 0xFD
+  filler and the trailing terminator from every frame, join, and parse MIDI with
+  running status. Frame timestamps are still used for arrival cadence, which is
+  the one thing that genuinely is per-frame.
 
   This answers the X1 questions from docs/HANDOFF-WINDOWS.md that can be
   settled from the wire alone:
@@ -36,7 +48,12 @@ param(
 $ErrorActionPreference = 'Stop'
 if (-not (Test-Path $Tsv)) { throw "not found: $Tsv" }
 
+# Pass 1: frames, kept whole. Arrival cadence is a property of the transport, so
+# it is measured here and never from parsed messages.
 $frames = New-Object System.Collections.ArrayList
+$stream = New-Object 'System.Collections.Generic.List[int]'
+$stamps = New-Object 'System.Collections.Generic.List[double]'
+$spanning = 0
 foreach ($line in [System.IO.File]::ReadLines((Resolve-Path $Tsv))) {
     if ([string]::IsNullOrWhiteSpace($line)) { continue }
     $p = $line -split "`t"
@@ -48,19 +65,44 @@ foreach ($line in [System.IO.File]::ReadLines((Resolve-Path $Tsv))) {
     for ($i = 0; $i -lt $hex.Length; $i += 2) {
         $b.Add([Convert]::ToInt32($hex.Substring($i, 2), 16))
     }
-    # b0 cc vv | e0 lsb msb
-    if ($b[0] -ne 0xB0) { continue }
-    [void]$frames.Add([pscustomobject]@{
-        T   = [double]$p[0]
-        CC  = $b[1]
-        Val = $b[2]
-        HasPb = ($b.Count -gt 5 -and $b[3] -eq 0xE0)
-        Pb  = if ($b.Count -gt 5 -and $b[3] -eq 0xE0) { $b[4] -bor ($b[5] -shl 7) } else { $null }
-        Tail = $b[$b.Count - 1]
-    })
+    $t = [double]$p[0]
+    if (($b[0] -band 0x80) -eq 0) { $spanning++ }
+    [void]$frames.Add([pscustomobject]@{ T = $t; Tail = $b[$b.Count - 1]; First = $b[0] })
+
+    # Strip the 0xFD filler and the trailing terminator, then append. Each byte
+    # carries its frame's timestamp so a parsed message can be dated by the
+    # frame its LAST byte arrived in, which is when a host actually has it.
+    for ($i = 0; $i -lt $b.Count - 1; $i++) {
+        if ($b[$i] -eq 0xFD) { continue }
+        $stream.Add($b[$i]); $stamps.Add($t)
+    }
 }
 
-if ($frames.Count -eq 0) { throw 'no B0 frames parsed' }
+if ($frames.Count -eq 0) { throw 'no frames parsed' }
+
+# Pass 2: MIDI out of the concatenated stream, with running status.
+$msgs = New-Object System.Collections.ArrayList
+$status = 0; $data = New-Object 'System.Collections.Generic.List[int]'
+for ($i = 0; $i -lt $stream.Count; $i++) {
+    $x = $stream[$i]
+    if ($x -ge 0xF8) { continue }                       # realtime is transparent
+    if (($x -band 0x80) -ne 0) { $status = $x; $data.Clear(); continue }
+    if ($status -eq 0) { continue }                     # data with no status yet
+    $data.Add($x)
+    $need = if (($status -band 0xF0) -eq 0xC0 -or ($status -band 0xF0) -eq 0xD0) { 1 } else { 2 }
+    if ($data.Count -lt $need) { continue }
+    [void]$msgs.Add([pscustomobject]@{
+        T      = $stamps[$i]
+        Status = $status
+        D1     = $data[0]
+        D2     = if ($need -eq 2) { $data[1] } else { $null }
+    })
+    $data.Clear()                                       # running status stays armed
+}
+
+$posMsgs = @($msgs | Where-Object { $_.Status -eq 0xB0 -and ($_.D1 -eq 0x00 -or $_.D1 -eq 0x02) })
+$pbMsgs  = @($msgs | Where-Object { ($_.Status -band 0xF0) -eq 0xE0 })
+if ($posMsgs.Count -eq 0) { throw 'no platter position messages parsed' }
 
 $t0 = $frames[0].T
 $t1 = $frames[$frames.Count - 1].T
@@ -70,31 +112,34 @@ Write-Host ''
 Write-Host '=== FRAME STRUCTURE ===' -ForegroundColor Cyan
 Write-Host ("  frames parsed      : {0}" -f $frames.Count)
 Write-Host ("  window             : {0:N3} s  ({1:N1} frames/s)" -f $dur, ($frames.Count / $dur))
-$ccSet = $frames | Group-Object CC | ForEach-Object { '0x{0:X2} x{1}' -f [int]$_.Name, $_.Count }
-Write-Host ("  CC numbers present : {0}" -f ($ccSet -join ', '))
-$withPb = @($frames | Where-Object { $_.HasPb }).Count
-Write-Host ("  frames carrying 0xE0: {0} / {1}" -f $withPb, $frames.Count)
+Write-Host ("  opening mid-message: {0} ({1:N1}%) <- why the stream is parsed whole" -f `
+    $spanning, ($spanning * 100.0 / $frames.Count))
+Write-Host ("  MIDI messages      : {0}" -f $msgs.Count)
+$ccSet = $posMsgs | Group-Object D1 | ForEach-Object { '0x{0:X2} x{1}' -f [int]$_.Name, $_.Count }
+Write-Host ("  position CCs       : {0}" -f ($ccSet -join ', '))
+Write-Host ("  0xE0 timestamps    : {0}  (positions: {1}{2})" -f $pbMsgs.Count, $posMsgs.Count,
+    $(if ($pbMsgs.Count -eq $posMsgs.Count) { ' - paired 1:1' } else { ' - NOT PAIRED' }))
 $tails = $frames | Group-Object Tail | ForEach-Object { '0x{0:X2} x{1}' -f [int]$_.Name, $_.Count }
 Write-Host ("  terminator byte    : {0}" -f ($tails -join ', '))
 
 # ---------------------------------------------------------------- Q4: wrap ---
 Write-Host ''
 Write-Host '=== Q4  does B0 00 wrap at 7 bits? ===' -ForegroundColor Cyan
-$vals = $frames | ForEach-Object { $_.Val }
+$vals = $posMsgs | ForEach-Object { $_.D2 }
 $mn = ($vals | Measure-Object -Minimum).Minimum
 $mx = ($vals | Measure-Object -Maximum).Maximum
 Write-Host ("  value range        : {0} .. {1}" -f $mn, $mx)
 Write-Host ("  distinct values    : {0}" -f ($vals | Sort-Object -Unique).Count)
 $wraps = 0; $deltas = New-Object System.Collections.ArrayList
-for ($i = 1; $i -lt $frames.Count; $i++) {
-    $d = $frames[$i].Val - $frames[$i - 1].Val
+for ($i = 1; $i -lt $posMsgs.Count; $i++) {
+    $d = $posMsgs[$i].D2 - $posMsgs[$i - 1].D2
     if ($d -lt -64) { $wraps++; $d += 128 }
     elseif ($d -gt 64) { $d -= 128 }
     [void]$deltas.Add($d)
 }
 $avgD = ($deltas | Measure-Object -Average).Average
 Write-Host ("  wrap events        : {0}  (high->low jumps)" -f $wraps)
-Write-Host ("  mean delta/frame   : {0:N3} counts" -f $avgD)
+Write-Host ("  mean delta/message : {0:N3} counts" -f $avgD)
 if ($mx -le 127 -and $wraps -gt 0) {
     Write-Host '  VERDICT: still a wrapping 7-bit counter - the driver does NOT widen or unwrap it' -ForegroundColor Yellow
 }
@@ -102,11 +147,13 @@ if ($mx -le 127 -and $wraps -gt 0) {
 # ------------------------------------------------- Q2: timestamp or position ---
 Write-Host ''
 Write-Host '=== Q2  is 0xE0 a timestamp or a position? ===' -ForegroundColor Cyan
-$pb = @($frames | Where-Object { $_.HasPb })
+$pb = $pbMsgs
 if ($pb.Count -gt 2) {
     $sum = 0.0; $n = 0
     for ($i = 1; $i -lt $pb.Count; $i++) {
-        $d = ($pb[$i].Pb - $pb[$i - 1].Pb) % 16384
+        $prev = $pb[$i - 1].D1 -bor ($pb[$i - 1].D2 -shl 7)
+        $cur  = $pb[$i].D1     -bor ($pb[$i].D2     -shl 7)
+        $d = ($cur - $prev) % 16384
         if ($d -lt 0) { $d += 16384 }
         $dt = $pb[$i].T - $pb[$i - 1].T
         if ($dt -gt 0 -and $d -gt 0 -and $d -lt 16000) { $sum += $d / $dt; $n++ }
@@ -149,8 +196,8 @@ foreach ($k in ($buckets.Keys | Sort-Object)) {
 }
 
 Write-Host ''
-Write-Host '=== sample frames ===' -ForegroundColor Cyan
-foreach ($f in ($frames | Select-Object -First $SampleRows)) {
-    Write-Host ("  t={0,10:N6}  CC 0x{1:X2}={2,3}  pb={3,5}  tail=0x{4:X2}" -f `
-        $f.T, $f.CC, $f.Val, $f.Pb, $f.Tail)
+Write-Host '=== sample messages (parsed from the stream, not per frame) ===' -ForegroundColor Cyan
+foreach ($m in ($msgs | Select-Object -First $SampleRows)) {
+    Write-Host ("  t={0,10:N6}  {1:X2} {2:X2} {3}" -f `
+        $m.T, $m.Status, $m.D1, $(if ($null -ne $m.D2) { '{0:X2}' -f $m.D2 } else { '--' }))
 }

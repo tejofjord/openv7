@@ -1141,6 +1141,12 @@ int main(int argc, char **argv) {
 
     long diag_o0 = 0, diag_i0 = 0; time_t diag_t = time(NULL), rearm_t = time(NULL);
     time_t jog_t = time(NULL);
+    /* Wall-clock seconds tick at an arbitrary point relative to startup, so the
+       first --diag-jog window is a partial second. The implied-clock figure is
+       accumulated device units divided by elapsed time, so it has to divide by
+       the window that actually elapsed, not by an assumed 1.0 s -- otherwise the
+       first line reports a fraction of the real clock and reads like a fault. */
+    long jog_us = now_us();
     unsigned char idle_frame[V7_OUT_FRAME_LEN]; memset(idle_frame, V7_MIDI_IDLE, V7_OUT_FRAME_LEN);
     struct timeval tvn; gettimeofday(&tvn, NULL); long ka04_ms = tvn.tv_sec*1000 + tvn.tv_usec/1000;
     while (!g_quit) {
@@ -1266,6 +1272,7 @@ int main(int argc, char **argv) {
         if (g_diag_jog) {
             time_t now = time(NULL);
             if (now != jog_t) {
+                double wsecs = (double)(now_us() - jog_us) / 1e6;
                 if (g_jog_n) {
                     double dmean = (double)g_jog_dsum / g_jog_n;
                     double hmean = (double)g_jog_hsum / g_jog_n;
@@ -1273,7 +1280,8 @@ int main(int argc, char **argv) {
                         "  [jog] e0/s=%ld pos/s=%ld GAPS=%ld | device dt mean=%.0f min=%u max=%u units"
                         " | host gap mean=%.0f min=%ld max=%ld us | implied clock %.0f Hz (expect 2822400)\n",
                         g_jog_n, g_jog_pos_n, g_jog_gaps, dmean, g_jog_dmin, g_jog_dmax,
-                        hmean, g_jog_hmin, g_jog_hmax, dmean * (double)g_jog_n);
+                        hmean, g_jog_hmin, g_jog_hmax,
+                        wsecs > 0 ? (double)g_jog_dsum / wsecs : 0.0);
                 } else if (g_jog_pos_n) {
                     fprintf(stderr, "  [jog] pos/s=%ld but ZERO 0xE0 timestamps — the 1:1 pairing is broken\n",
                             g_jog_pos_n);
@@ -1283,7 +1291,14 @@ int main(int argc, char **argv) {
                     fprintf(stderr, "  [jog] idle — platter not moving, nothing to measure\n");
                 }
                 g_jog_n = g_jog_pos_n = g_jog_gaps = 0; g_jog_dsum = 0; g_jog_hsum = 0;
-                jog_t = now;
+                /* Drop the running baselines too, so the first delta of the next
+                   window is measured between two messages INSIDE it. Otherwise a
+                   platter that stops and restarts produces one delta spanning the
+                   whole idle period, and that single sample seeds this window's
+                   min/max -- a host-gap max of several seconds, reported as if it
+                   were jitter. Costs one sample per second out of ~1000. */
+                g_jog_have = g_jog_pos_have = 0;
+                jog_t = now; jog_us = now_us();
             }
         }
     }

@@ -192,8 +192,15 @@ velocity. A stationary platter sends nothing at all ✅.
 > the very bottom of the strip". A host that treats the strip as a plain
 > absolute position will jump the playhead to the start of the track **every
 > time the finger leaves**, which presents as a broken mapping but is the
-> protocol working as designed. Disambiguate by treating a `0` that follows a
-> non-zero value as a release, not a position.
+> protocol working as designed.
+>
+> A **heuristic** that works in practice is to treat a `0` following a non-zero
+> value as a release rather than a position. It is not sound, and the failure is
+> easy to state: sliding a finger from mid-strip down to the physical bottom
+> emits exactly that sequence, and the rule discards a seek the user meant. The
+> device sends no independent touch-state signal, so nothing measured here can
+> separate the two cases — a host that needs the bottom of the strip to be
+> reachable has to accept the spurious jumps, or ignore the bottom few counts.
 
 > Input CC `0x45` is the deck-A strip search; output CC `0x45` is motor RPM
 > select. Input `0x46`/`0x47` are the start/stop-time knobs; output `0x46` is
