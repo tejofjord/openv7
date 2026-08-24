@@ -25,6 +25,9 @@
 #include <unistd.h>
 #include <pthread.h>
 #include <pthread/qos.h>
+#include <mach/mach_time.h>
+#include <mach/thread_policy.h>
+#include <mach/thread_act.h>
 #include <sys/resource.h>
 #include <libusb.h>
 #include <CoreMIDI/CoreMIDI.h>
@@ -34,6 +37,21 @@
 /* Defined in nonap.m — holds a LatencyCritical activity assertion so the menu-bar
    app's QoS clamp doesn't throttle the isochronous stream. */
 extern void openv7_prevent_appnap(void);
+
+static mach_timebase_info_data_t g_tb;
+static void tb_init(void) { if (!g_tb.denom) mach_timebase_info(&g_tb); }
+
+/* Monotonic, and in the SAME clock mach_wait_until takes. gettimeofday is a wall
+   clock: it can step, and it cannot be handed to a precise waiter. */
+static long now_us(void) {
+    tb_init();
+    return (long)((double)mach_absolute_time() * g_tb.numer / g_tb.denom / 1000.0);
+}
+static uint64_t us_to_mach(long us) {
+    tb_init();
+    return (uint64_t)((double)us * 1000.0 * g_tb.denom / g_tb.numer);
+}
+
 
 /* ---- globals ---- */
 static libusb_context     *g_ctx;
@@ -304,6 +322,211 @@ static void batch_add(const uint8_t *msg, int len) {
     if (p) { g_pkt = p; g_pkt_n++; }
 }
 static void batch_flush(void) { if (g_pkt_n) MIDIReceived(g_source, g_pl); g_pkt_n = 0; }
+
+/* ---- platter re-timing (PROTOTYPE, --pace / SIGUSR2) --------------------
+   The deck timestamps every platter position off its own 2,822,400 Hz clock
+   (11.2896 MHz / 4 -- the crystal is on the main PCB, see the service manual).
+   That timestamp is exact, but it is 14 bits, so it wraps every 5.8 ms and a
+   longer gap between frames leaves the elapsed time ambiguous.
+
+   VirtualDJ cannot use it at all: its controller-definition format has no
+   notion of a device-supplied timestamp, so it derives jog velocity from when
+   messages ARRIVE. Measured against captured data, that is wrong by more than
+   10% on 15% of intervals (p01/p99 of 1001..7435 ticks/s against a true 2000).
+   On a motorized deck the platter IS the transport, so each of those is a
+   position discontinuity -- the skipping.
+
+   Rather than teach the app about timestamps, make arrival TRUE: hold each
+   platter message briefly and release it at the host time its own timestamp
+   says the event happened. The app's arrival arithmetic then becomes exact,
+   including across gaps, because a frame after a 17 ms hole genuinely arrives
+   17 ms later. Nothing is fabricated -- we only stop imposing transport jitter
+   on information the deck already timed correctly.
+
+   The wrap is resolved with the host clock, which is coarse (~1 ms) but never
+   ambiguous, while the device clock is exact but wraps: pick the wrap count k
+   that makes the two agree. Validated offline on captured data -- velocity error
+   across gap intervals fell from 77% wrong to 2.5%, and overall from 15% to
+   0.1%. */
+static int g_pace = 0;
+
+/* --e0-position: EXPERIMENT. Rewrite the platter's 0xE0 payload with a 14-bit
+   ABSOLUTE POSITION accumulated from the CC counter, instead of forwarding the
+   deck's timestamp.
+
+   The deck sends 0xE0 as a timestamp off its 2,822,400 Hz clock -- that much is
+   measured and certain. What is NOT known is what VirtualDJ does with it. VDJ
+   needs it (suppressing it kills the jog entirely) yet cannot read timestamps,
+   its definition format has no such concept. The V7 is sold as "10x the
+   resolution of standard MIDI": 7-bit CC gives 128 positions per revolution
+   against 3600 encoder ticks, while 14-bit pitch-bend gives 16384. If VDJ binds
+   0xE0 as a high-resolution jog POSITION, we are feeding it a free-running clock
+   that wraps 172 times a second, and it is chasing that as platter motion.
+
+   This puts real position there instead. If the hiccups stop, that was it. */
+static int g_e0_position = 0;
+static long g_e0_abs;            /* accumulated 14-bit platter position */
+static int  g_e0_have; static uint8_t g_e0_lastpos;
+#define PACE_BUFFER_US 5000     /* fixed delay that absorbs arrival jitter */
+
+static long now_us(void);
+
+static pthread_mutex_t g_pq_mtx = PTHREAD_MUTEX_INITIALIZER;
+#define PQ 1024
+static struct { uint8_t m[3]; int n; long due; } g_pq[PQ];
+static int g_pq_head, g_pq_tail;
+static pthread_t g_pace_thr; static int g_pace_thr_up;
+static long g_pace_late_sum, g_pace_late_max; static long g_pace_late_n;
+
+/* unwrap + clock-recovery state */
+static int  g_ts_have; static unsigned g_ts_prev; static long g_ts_host_prev;
+static long long g_dev_us;                 /* monotonic device time, microseconds */
+static long g_off; static int g_off_have;  /* host_us - dev_us */
+static uint8_t g_pend_pos[3]; static int g_pend_n;
+static uint8_t g_pace_prev_pos; static long g_pace_prev_due; static int g_pace_prev_have;
+static long g_pace_filled;
+static double g_pace_vel; static long g_pace_next_fill; static uint8_t g_pace_cc;
+
+static void pace_push(const uint8_t *m, int n, long due) {
+    pthread_mutex_lock(&g_pq_mtx);
+    int next = (g_pq_head + 1) % PQ;
+    if (next != g_pq_tail) {
+        memcpy(g_pq[g_pq_head].m, m, 3); g_pq[g_pq_head].n = n; g_pq[g_pq_head].due = due;
+        g_pq_head = next;
+    }
+    pthread_mutex_unlock(&g_pq_mtx);
+}
+
+static void *pace_thread(void *a) {
+    (void)a;
+    pthread_setname_np("openv7-pace");
+    /* TIME-CONSTRAINT scheduling, the policy CoreAudio render threads use. QoS is
+       not enough: a normal thread's nanosleep resolves to the scheduler quantum,
+       which measured 140-900 us of lateness against a 1 ms stream -- larger than
+       the jitter this thread exists to remove. */
+    tb_init();
+    {
+        double ns_per_tick = (double)g_tb.numer / g_tb.denom;
+        thread_time_constraint_policy_data_t pol;
+        pol.period      = (uint32_t)(1000000.0 / ns_per_tick);   /* 1 ms, the frame rate */
+        pol.computation = (uint32_t)(  50000.0 / ns_per_tick);   /* 50 us of work */
+        pol.constraint  = (uint32_t)( 200000.0 / ns_per_tick);   /* finish within 200 us */
+        pol.preemptible = 0;
+        if (thread_policy_set(pthread_mach_thread_np(pthread_self()),
+                              THREAD_TIME_CONSTRAINT_POLICY, (thread_policy_t)&pol,
+                              THREAD_TIME_CONSTRAINT_POLICY_COUNT) != KERN_SUCCESS)
+            fprintf(stderr, "OpenV7: real-time scheduling refused; re-timing will be coarse\n");
+    }
+    while (!g_quit) {
+        long now = now_us();
+        for (;;) {
+            uint8_t m[3]; int n = 0;
+            pthread_mutex_lock(&g_pq_mtx);
+            long due = 0;
+            if (g_pq_head != g_pq_tail && g_pq[g_pq_tail].due <= now) {
+                memcpy(m, g_pq[g_pq_tail].m, 3); n = g_pq[g_pq_tail].n; due = g_pq[g_pq_tail].due;
+                g_pq_tail = (g_pq_tail + 1) % PQ;
+            }
+            pthread_mutex_unlock(&g_pq_mtx);
+            if (!n) break;
+            /* How late was this release against its deadline? Measured in-process
+               because a second CoreMIDI client has scheduling jitter of its own,
+               and the tap could not tell our error from its own. */
+            long late = now_us() - due;
+            if (late < 0) late = -late;
+            g_pace_late_sum += late; g_pace_late_n++;
+            if (late > g_pace_late_max) g_pace_late_max = late;
+            midi_to_apps(m, n);
+        }
+        /* Sleep to the NEXT DEADLINE, not on a fixed grid. A 200 us grid against a
+           1 ms stream quantises every interval by up to 20%, which is larger than
+           the jitter this thread exists to remove -- measured, it left arrival
+           velocity just as wrong as no pacing at all. */
+        /* Wait to an ABSOLUTE deadline. mach_wait_until is precise; nanosleep is
+           a request the scheduler rounds to its own convenience. */
+        long next;
+        pthread_mutex_lock(&g_pq_mtx);
+        next = (g_pq_head != g_pq_tail) ? g_pq[g_pq_tail].due : 0;
+        pthread_mutex_unlock(&g_pq_mtx);
+        long target = next ? next : now_us() + 500;   /* idle: look again shortly */
+        mach_wait_until(us_to_mach(target));
+    }
+    return NULL;
+}
+
+/* Feed one decoded message into the re-timer. Non-platter controls go straight
+   out: they carry no timestamp and a button has nothing to be jittered against. */
+static void pace_feed(const uint8_t *m, int n) {
+    long host = now_us();
+    if ((m[0] & 0xF0) == 0xB0 && (m[1] == 0x00 || m[1] == 0x02)) {
+        memcpy(g_pend_pos, m, 3); g_pend_n = n;      /* wait for its timestamp */
+        return;
+    }
+    if ((m[0] & 0xF0) == 0xE0 && n >= 3) {
+        unsigned ts = (unsigned)m[1] | ((unsigned)m[2] << 7);
+        if (!g_ts_have) { g_ts_have = 1; g_ts_prev = ts; g_ts_host_prev = host; g_dev_us = 0; }
+        else {
+            unsigned draw = (ts - g_ts_prev) & 0x3FFF;
+            double dt_host = (double)(host - g_ts_host_prev);
+            long k = (long)((dt_host * 2.8224 - (double)draw) / 16384.0 + 0.5);
+            if (k < 0) k = 0;
+            long long dunits = (long long)draw + (long long)k * 16384;
+            g_dev_us += (long long)((double)dunits / 2.8224);
+            g_ts_prev = ts; g_ts_host_prev = host;
+        }
+        /* Clock recovery: the LEAST delayed observation is the truest, so track
+           its minimum and creep upward to follow crystal drift. */
+        long obs = host - (long)g_dev_us;
+        if (!g_off_have) { g_off = obs; g_off_have = 1; }
+        else if (obs < g_off) g_off = obs;
+        else g_off += 1;
+        long due = (long)g_dev_us + g_off + PACE_BUFFER_US;
+
+        /* Keep every delivered step UNAMBIGUOUS. The position counter is 7 bits,
+           so it wraps every 128 counts; a receiver turning that into absolute
+           motion can only do so while each step is under half the range. A step
+           of 66 counts is undecidable -- forward 66 or backward 62 -- and a wrong
+           guess moves the playhead by a third of a revolution. Measured on this
+           deck: steps >= 64 counts occur about 1.3 times a second, which is
+           exactly the rate of the audible jumps.
+
+           So split any oversized step into pieces small enough to be read only
+           one way. This is the minimum intervention that removes the ambiguity:
+           a 70-count gap needs two intermediate points, not thirty-five. We are
+           not reconstructing the platter's path at millisecond resolution -- we
+           are only guaranteeing the receiver cannot misread its direction.
+
+           Bounded by two MEASURED endpoints, never extrapolated: prediction was
+           tried and invented 699 positions against 46 real ones when the platter
+           slowed, because constant velocity stops being true exactly when a DJ
+           touches the deck. */
+#define STEP_SAFE 32              /* well inside the 64-count ambiguity limit */
+        if (g_pace_prev_have && g_pend_n) {
+            long dt = due - g_pace_prev_due;
+            int  dp = (int)((g_pend_pos[2] - g_pace_prev_pos) & 0x7F);
+            if (dp > STEP_SAFE && dp < 120 && dt > 0 && dt < 200000) {
+                int steps = (dp + STEP_SAFE - 1) / STEP_SAFE;      /* ceil */
+                if (steps > 8) steps = 8;
+                for (int k = 1; k < steps; k++) {
+                    uint8_t sm[3] = { g_pend_pos[0], g_pend_pos[1],
+                                      (uint8_t)((g_pace_prev_pos + (dp * k) / steps) & 0x7F) };
+                    pace_push(sm, 3, g_pace_prev_due + (dt * k) / steps);
+                    g_pace_filled++;
+                }
+            }
+        }
+        if (g_pend_n) {
+            pace_push(g_pend_pos, g_pend_n, due);
+            /* (kept for reference: last real position, when it is due, and the
+               velocity, unused now that prediction is gone) */
+            g_pace_prev_pos = g_pend_pos[2]; g_pace_prev_due = due; g_pace_prev_have = 1;
+            g_pend_n = 0;
+        }
+        pace_push(m, n, due);
+        return;
+    }
+    midi_to_apps(m, n);
+}
 
 /* ---- CoreMIDI: receive from apps -> queue for the device ---- */
 static void dest_read(const MIDIPacketList *pl, void *refCon, void *srcRefCon) {
@@ -692,10 +915,6 @@ static long     g_jog_dsum; static unsigned g_jog_dmin, g_jog_dmax;   /* clock u
 static long     g_jog_hsum; static long g_jog_hmin, g_jog_hmax;       /* host us     */
 static long     g_jog_hprev;
 
-static long now_us(void) {
-    struct timeval tv; gettimeofday(&tv, NULL);
-    return tv.tv_sec * 1000000L + tv.tv_usec;
-}
 
 static void jog_stat(const uint8_t *m, int n) {
     if (n < 3) return;
@@ -743,8 +962,19 @@ static void LIBUSB_CALL ctrl_in_cb(struct libusb_transfer *t) {
         for (int i = 0; i < t->actual_length; i++) {
             int n = midi_feed(&g_in, t->buffer[i], out);
             if (n > 0) {
+                if (g_e0_position && n >= 3) {
+                    if ((out[0] & 0xF0) == 0xB0 && (out[1] == 0x00 || out[1] == 0x02)) {
+                        if (g_e0_have) g_e0_abs = (g_e0_abs + (int)((out[2] - g_e0_lastpos) & 0x7F)) & 0x3FFF;
+                        g_e0_lastpos = out[2]; g_e0_have = 1;
+                    } else if ((out[0] & 0xF0) == 0xE0) {
+                        out[1] = (uint8_t)(g_e0_abs & 0x7F);          /* LSB */
+                        out[2] = (uint8_t)((g_e0_abs >> 7) & 0x7F);   /* MSB */
+                    }
+                }
                 if (forward_to_apps(out)) {
-                    if (g_batch_frame) batch_add(out, n); else midi_to_apps(out, n);
+                    if (g_pace)             pace_feed(out, n);
+                    else if (g_batch_frame) batch_add(out, n);
+                    else                    midi_to_apps(out, n);
                 }
                 if (g_diag_jog) jog_stat(out, n);
                 if (g_learn) learn_note(out[0], out[1], n == 3 ? out[2] : 0);
@@ -834,6 +1064,8 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--diag")) g_diag = 1;
         else if (!strcmp(argv[i], "--diag-jog")) g_diag_jog = 1;
         else if (!strcmp(argv[i], "--no-timestamps")) g_send_timestamps = 0;
+        else if (!strcmp(argv[i], "--pace")) g_pace = 1;
+        else if (!strcmp(argv[i], "--e0-position")) g_e0_position = 1;
         else if (!strcmp(argv[i], "--no-keepalive")) g_keepalive = 0;
         else if (!strcmp(argv[i], "--supervised")) g_supervised = 1;
         else if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help")) {
@@ -982,6 +1214,8 @@ int main(int argc, char **argv) {
         fprintf(stderr, "OpenV7: LEARN mode — touch every control once, then Ctrl-C for the map.\n");
     else
         fprintf(stderr, "OpenV7: running. Select \"Numark V7\" in your DJ app. Ctrl-C to stop.\n");
+    if (pthread_create(&g_pace_thr, NULL, pace_thread, NULL) == 0) g_pace_thr_up = 1;
+    else fprintf(stderr, "OpenV7: could not start the re-timing thread; --pace disabled\n");
     g_last_data_ms = now_ms();
 
     long diag_o0 = 0, diag_i0 = 0; time_t diag_t = time(NULL), rearm_t = time(NULL);
@@ -1027,16 +1261,16 @@ int main(int argc, char **argv) {
         }
         if (g_toggle_ts) {      /* SIGUSR1: flip the timestamp filter in place */
             g_toggle_ts = 0;
-            g_send_timestamps = !g_send_timestamps;
-            fprintf(stderr, "OpenV7: platter 0xE0 timestamps -> apps: %s\n",
-                    g_send_timestamps ? "ON (raw protocol)" : "OFF (filtered)");
+            g_e0_position = !g_e0_position;
+            fprintf(stderr, "OpenV7: 0xE0 payload: %s\n",
+                    g_e0_position ? "14-bit PLATTER POSITION (experiment)"
+                                  : "the deck's raw timestamp");
         }
         if (g_toggle_batch) {
             g_toggle_batch = 0;
-            g_batch_frame = !g_batch_frame;
-            fprintf(stderr, "OpenV7: CoreMIDI packing: %s\n",
-                    g_batch_frame ? "ONE packet list per USB transfer (pair kept together)"
-                                  : "one packet list per message (original)");
+            g_pace = !g_pace;
+            fprintf(stderr, "OpenV7: platter re-timing: %s\n",
+                    g_pace ? "ON (released on the deck's own clock)" : "OFF (raw arrival)");
         }
         /* EP0 status re-arm, every 2 s (secondary keepalive) — legacy only. */
         if (g_keepalive) { time_t now = time(NULL);
@@ -1115,9 +1349,11 @@ int main(int argc, char **argv) {
                     double dmean = (double)g_jog_dsum / g_jog_n;
                     double hmean = (double)g_jog_hsum / g_jog_n;
                     fprintf(stderr,
-                        "  [jog] e0/s=%ld pos/s=%ld GAPS=%ld | device dt mean=%.0f min=%u max=%u units"
+                        "  [jog] e0/s=%ld pos/s=%ld GAPS=%ld filled=%ld pace_late=%ldus/max%ldus | device dt mean=%.0f min=%u max=%u units"
                         " | host gap mean=%.0f min=%ld max=%ld us | implied clock %.0f Hz (expect 2822400)\n",
-                        g_jog_n, g_jog_pos_n, g_jog_gaps, dmean, g_jog_dmin, g_jog_dmax,
+                        g_jog_n, g_jog_pos_n, g_jog_gaps, g_pace_filled,
+                        g_pace_late_n ? g_pace_late_sum/g_pace_late_n : 0, g_pace_late_max,
+                        dmean, g_jog_dmin, g_jog_dmax,
                         hmean, g_jog_hmin, g_jog_hmax, dmean * (double)g_jog_n);
                 } else if (g_jog_pos_n) {
                     fprintf(stderr, "  [jog] pos/s=%ld but ZERO 0xE0 timestamps — the 1:1 pairing is broken\n",
@@ -1128,6 +1364,7 @@ int main(int argc, char **argv) {
                     fprintf(stderr, "  [jog] idle — platter not moving, nothing to measure\n");
                 }
                 g_jog_n = g_jog_pos_n = g_jog_gaps = 0; g_jog_dsum = 0; g_jog_hsum = 0;
+                g_pace_late_sum = g_pace_late_n = g_pace_late_max = 0; g_pace_filled = 0;
                 jog_t = now;
             }
         }
