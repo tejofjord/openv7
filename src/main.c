@@ -197,7 +197,13 @@ static void outq_push(const unsigned char *msg, int len) {
 }
 
 /* ---- small MIDI message splitter (handles running status) ---- */
-struct midi_split { uint8_t status, data[2]; int ndata, need, insysex; };
+struct midi_split { uint8_t status, data[2]; int ndata, need, insysex; int pad; };
+
+/* How many consecutive 0xFD bytes mark the END of a 42-byte frame rather than
+   incidental filler. Real frames carry 35-38 of them; a lone 0xFD between two
+   messages is filler and must stay transparent, which is why this is a run
+   length and not "any 0xFD". */
+#define FRAME_PAD_MIN 8
 /* Length of a complete message INCLUDING its status byte.
 
    System common used to fall into the `default: return 3` below, which is wrong
@@ -227,7 +233,20 @@ static int midi_msg_len(uint8_t status) {
  * arbitrary length. Dropping it is a deliberate limitation; mangling it into
  * fake channel messages, which is what happened before, is a bug. */
 static int midi_feed(struct midi_split *s, uint8_t x, uint8_t out[3]) {
-    if (x == V7_MIDI_IDLE) return 0;
+    if (x == V7_MIDI_IDLE) { if (s->pad < FRAME_PAD_MIN) s->pad++; return 0; }
+    /* End of a frame. The byte after a long 0xFD run is the frame TERMINATOR
+       (0x00 inbound, docs/PROTOCOL.md) -- part of the container, not MIDI.
+       Letting it reach the data-byte path is what fabricated a whole extra
+       message after every 2-byte one, and put a bogus 0x00-LSB timestamp into
+       the platter stream 3.4% of the time. Frames are self-contained, so
+       running status is dropped at the boundary too: a data byte at the start
+       of a frame belongs to no previous message. */
+    if (s->pad >= FRAME_PAD_MIN) {
+        s->pad = 0; s->status = 0; s->ndata = 0; s->insysex = 0;
+        if (x == 0x00) return 0;             /* swallow the terminator */
+        /* Anything else is already the next frame's first byte -- parse it. */
+    }
+    s->pad = 0;
     if (x >= 0xF8) return 0;                 /* system realtime — ignore, running status survives */
     if (x & 0x80) {
         if (x == 0xF0) { s->insysex = 1; s->status = 0; return 0; }
@@ -264,6 +283,25 @@ static void midi_to_apps(const uint8_t *msg, int len) {
     if (p) MIDIReceived(g_source, pl);
 }
 
+/* Batched variant: build one packet list across a whole transfer, flush once. */
+static Byte g_pkt_buf[4096];
+static MIDIPacketList *g_pl;
+static MIDIPacket *g_pkt;
+static int g_pkt_n;
+
+static void batch_begin(void) {
+    g_pl = (MIDIPacketList *)g_pkt_buf;
+    g_pkt = MIDIPacketListInit(g_pl);
+    g_pkt_n = 0;
+}
+static void batch_add(const uint8_t *msg, int len) {
+    MIDIPacket *p = MIDIPacketListAdd(g_pl, sizeof g_pkt_buf, g_pkt, 0, len, msg);
+    if (!p) { if (g_pkt_n) MIDIReceived(g_source, g_pl); batch_begin();   /* full: flush and restart */
+              p = MIDIPacketListAdd(g_pl, sizeof g_pkt_buf, g_pkt, 0, len, msg); }
+    if (p) { g_pkt = p; g_pkt_n++; }
+}
+static void batch_flush(void) { if (g_pkt_n) MIDIReceived(g_source, g_pl); g_pkt_n = 0; }
+
 /* ---- CoreMIDI: receive from apps -> queue for the device ---- */
 static void dest_read(const MIDIPacketList *pl, void *refCon, void *srcRefCon) {
     (void)refCon; (void)srcRefCon;
@@ -272,7 +310,18 @@ static void dest_read(const MIDIPacketList *pl, void *refCon, void *srcRefCon) {
         struct midi_split s = {0}; uint8_t out[3];
         for (unsigned j = 0; j < p->length; j++) {
             int n = midi_feed(&s, p->data[j], out);
-            if (n > 0) outq_push(out, n);
+            if (n > 0) {
+                outq_push(out, n);
+                /* App -> device was completely unlogged, so "the DJ app pressed
+                   play and the platter did not spin" had no evidence either way:
+                   nothing showed whether the app had sent a motor command at
+                   all. Inbound has had -v since the beginning; this is its twin. */
+                if (g_verbose) {
+                    fprintf(stderr, "  out ");
+                    for (int k = 0; k < n; k++) fprintf(stderr, "%02x ", out[k]);
+                    fprintf(stderr, "%s\n", ctrl_label(out[0], out[1]));
+                }
+            }
         }
         p = MIDIPacketNext(p);
     }
@@ -402,7 +451,11 @@ static void clear_halt_later(unsigned char ep) {
    whose bounce bursts hard, produced "90 00 1c" in the middle of a run of
    "90 1c 7f"/"90 1c 00" -- the pairing slipped because one 1c went missing.
    Keeping several transfers queued means the endpoint is always armed. */
+/* Overridable at build time so the queue depth can be A/B tested against the
+   jog-timestamp ordering measurement (tools: --diag-jog). */
+#ifndef CTRL_IN_NXFER
 #define CTRL_IN_NXFER 4
+#endif
 static struct libusb_transfer *g_t_in[CTRL_IN_NXFER];
 
 /* A libusb error that means "this handle is dead", not "try again".
@@ -516,6 +569,64 @@ static struct midi_split g_in;                        /* device-side parser stat
    count, and the wall-clock gap between arrivals as seen from this process. */
 static int g_diag_jog = 0;
 
+/* The platter's 0xE0 timestamps ARE forwarded, and must be: VirtualDJ's native
+   V7 mapping drives the jog from them, not from the position CC. Proven live --
+   suppressing them silences the jog completely while CC 0x00 keeps streaming at
+   ~968/s.
+
+   They were briefly suppressed here on the theory that a DJ app was binding
+   them as literal pitch bend. That theory was wrong, and the experiment that
+   appeared to confirm it was confounded: suppressing them required restarting
+   the bridge, which tore down the CoreMIDI endpoint, and an app that has lost
+   its controller sounds exactly like an app whose jitter is fixed.
+
+   The real fault was ours and upstream of all of this -- see FRAME_PAD_MIN in
+   midi_feed. The frame terminator was being parsed as MIDI, fabricating a
+   bogus-timestamp 0xE0 message 3.4% of the time (chance: 0.78%), and each one
+   is a wrong jog velocity. With that fixed the rate is 0.79% and backwards
+   timestamp deltas fell from 1.83% to 0.36%.
+
+   --no-timestamps still suppresses them, because it is the fastest way to tell
+   a jog fault from a timestamp fault on any app. */
+static int g_send_timestamps = 1;
+
+/* SIGUSR1 toggles the filter AT RUNTIME. This exists because testing it by
+   restarting the bridge is not a valid experiment: a restart tears down the
+   CoreMIDI source, and a DJ app that loses its controller mid-session goes
+   quiet whether or not the filter did anything. The first attempt at this A/B
+   produced "the audio is perfect now" from an app that had simply stopped
+   receiving. Toggling in place keeps the endpoint, the app's binding and the
+   audio stream all untouched, so the only thing that changes is the one thing
+   under test.
+     kill -USR1 $(pgrep -f openv7) */
+static volatile sig_atomic_t g_toggle_ts = 0;
+static void on_sigusr1(int sig) { (void)sig; g_toggle_ts = 1; }
+
+/* Deliver every message decoded from ONE USB transfer in a SINGLE
+   MIDIPacketList, instead of one list per message.
+
+   On the wire the platter's position and its 0xE0 timestamp are two messages
+   inside the SAME 42-byte frame -- they are one event, split across two MIDI
+   messages by the protocol. midi_to_apps has always sent one MIDIPacketList per
+   message, so that atomic pair reaches the app as two separate deliveries. A
+   host that pairs a position with the timestamp it arrived WITH would mis-pair
+   them, and a mis-paired timestamp is a wrong velocity, which in vinyl mode is
+   a wrong playback speed.
+
+   SIGUSR2 toggles it, for the same reason SIGUSR1 exists: the comparison is
+   only valid if the app never loses the endpoint.
+     kill -USR2 $(pgrep -f openv7) */
+static int g_batch_frame = 0;
+static volatile sig_atomic_t g_toggle_batch = 0;
+static void on_sigusr2(int sig) { (void)sig; g_toggle_batch = 1; }
+
+/* Should this decoded message go to CoreMIDI at all? Split out so it is
+   testable: the filter is a claim about the protocol, and claims get tests. */
+static int forward_to_apps(const uint8_t *msg) {
+    if (!g_send_timestamps && (msg[0] & 0xF0) == 0xE0) return 0;   /* platter timestamp */
+    return 1;
+}
+
 static long     g_jog_n, g_jog_pos_n;          /* 0xE0s and paired position CCs  */
 static int      g_jog_have;                    /* seen a first 0xE0 to diff from */
 static unsigned g_jog_prev;                    /* previous 14-bit timestamp      */
@@ -556,10 +667,13 @@ static void LIBUSB_CALL ctrl_in_cb(struct libusb_transfer *t) {
     if (t->status == LIBUSB_TRANSFER_COMPLETED) {
         g_ctrl_bytes += t->actual_length;
         uint8_t out[3];
+        if (g_batch_frame) batch_begin();
         for (int i = 0; i < t->actual_length; i++) {
             int n = midi_feed(&g_in, t->buffer[i], out);
             if (n > 0) {
-                midi_to_apps(out, n);
+                if (forward_to_apps(out)) {
+                    if (g_batch_frame) batch_add(out, n); else midi_to_apps(out, n);
+                }
                 if (g_diag_jog) jog_stat(out, n);
                 if (g_learn) learn_note(out[0], out[1], n == 3 ? out[2] : 0);
                 if (g_verbose) {
@@ -569,6 +683,7 @@ static void LIBUSB_CALL ctrl_in_cb(struct libusb_transfer *t) {
                 }
             }
         }
+        if (g_batch_frame) batch_flush();
     }
     if (t->status == LIBUSB_TRANSFER_NO_DEVICE) { g_quit = 1; return; }
     if (t->status == LIBUSB_TRANSFER_STALL) clear_halt_later(V7_EP_CTRL_IN);
@@ -646,14 +761,20 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--learn")) g_learn = 1;
         else if (!strcmp(argv[i], "--diag")) g_diag = 1;
         else if (!strcmp(argv[i], "--diag-jog")) g_diag_jog = 1;
+        else if (!strcmp(argv[i], "--no-timestamps")) g_send_timestamps = 0;
         else if (!strcmp(argv[i], "--no-keepalive")) g_keepalive = 0;
         else if (!strcmp(argv[i], "--supervised")) g_supervised = 1;
         else if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help")) {
             printf("OpenV7 — Numark V7 userspace driver\n"
                    "usage: openv7 [-v|--verbose] [--learn] [--diag] [--diag-jog]\n"
+                   "       [--no-timestamps] [--no-keepalive]\n"
                    "  -v        print decoded MIDI as it arrives\n"
                    "  --learn   catalog each control once (touch every control, Ctrl-C for the map)\n"
                    "  --diag    print isochronous stream health once a second (~200/~62 = healthy)\n"
+                   "  --no-timestamps\n"
+                   "            suppress the platter's 0xE0 timestamp messages. Diagnostic:\n"
+                   "            VirtualDJ drives the jog FROM them, so this silences the jog\n"
+                   "            and tells a jog fault apart from a timestamp fault.\n"
                    "  --diag-jog\n"
                    "            print platter timestamp-clock health once a second: whether the\n"
                    "            device's 0xE0 clock is smooth, whether position/timestamp stay\n"
@@ -675,6 +796,8 @@ int main(int argc, char **argv) {
 
     signal(SIGINT, on_sigint);
     signal(SIGTERM, on_sigint);
+    signal(SIGUSR1, on_sigusr1);
+    signal(SIGUSR2, on_sigusr2);
     g_parent_pid = getppid();
 
     /* Clear any inherited background/throttled scheduling. A menu-bar app's
@@ -793,6 +916,19 @@ int main(int argc, char **argv) {
         struct timeval tv = { 0, 20000 };
         libusb_handle_events_timeout(g_ctx, &tv);
         clear_halt_drain();     /* stall recovery, deferred out of the callbacks */
+        if (g_toggle_ts) {      /* SIGUSR1: flip the timestamp filter in place */
+            g_toggle_ts = 0;
+            g_send_timestamps = !g_send_timestamps;
+            fprintf(stderr, "OpenV7: platter 0xE0 timestamps -> apps: %s\n",
+                    g_send_timestamps ? "ON (raw protocol)" : "OFF (filtered)");
+        }
+        if (g_toggle_batch) {
+            g_toggle_batch = 0;
+            g_batch_frame = !g_batch_frame;
+            fprintf(stderr, "OpenV7: CoreMIDI packing: %s\n",
+                    g_batch_frame ? "ONE packet list per USB transfer (pair kept together)"
+                                  : "one packet list per message (original)");
+        }
         /* EP0 status re-arm, every 2 s (secondary keepalive) — legacy only. */
         if (g_keepalive) { time_t now = time(NULL);
           if (now - rearm_t >= 2) { ploytec_rearm(); rearm_t = now; } }

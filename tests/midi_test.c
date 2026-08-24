@@ -95,6 +95,36 @@ int main(void) {
       i[k++]=0x00;
       expect("two platter frames -> 4 messages", i,k, w,12); }
 
+    puts("  -- frame terminator must not fabricate messages --");
+    /* THE JOG-JITTER BUG. A frame is <MIDI> <0xFD padding> <0x00 terminator>.
+       midi_feed skipped only 0xFD, so the terminator reached the data-byte path
+       and, under running status, became data[0] of a NEW message. After a
+       2-byte message that COMPLETES one -- a message the deck never sent.
+
+       Measured live against VirtualDJ: 3.39% of the platter's 0xE0 timestamps
+       carried LSB 0x00 where chance predicts 0.78%, and deltas touching those
+       ran backwards 31% of the time versus 1.8% for clean ones. Each fabricated
+       timestamp is a bogus jog velocity, which vinyl mode turns into audible
+       pitch modulation. */
+    { uint8_t i[42], w[] = {0xC0,0x05};
+      int k = 0;
+      i[k++]=0xC0; i[k++]=0x05;
+      for (int j = 0; j < 39; j++) i[k++] = 0xFD;
+      i[k++]=0x00;
+      expect("2-byte msg + terminator", i,k, w,2); }
+
+    /* Running status must not survive a frame boundary either: the byte after a
+       padding run belongs to the frame that is ending, never to the next one. */
+    { uint8_t i[90], w[] = {0xE0,0x71,0x75, 0xE0,0x1C,0x76};
+      int k = 0;
+      i[k++]=0xE0; i[k++]=0x71; i[k++]=0x75;
+      for (int j = 0; j < 38; j++) i[k++] = 0xFD;
+      i[k++]=0x00;
+      i[k++]=0xE0; i[k++]=0x1C; i[k++]=0x76;
+      for (int j = 0; j < 38; j++) i[k++] = 0xFD;
+      i[k++]=0x00;
+      expect("no running status across frames", i,k, w,6); }
+
     printf(fails ? "\n%d FAILED\n" : "\nall passed\n", fails);
     return fails != 0;
 }
