@@ -34,7 +34,7 @@ CFLAGS   += -Wno-deprecated-declarations
 LDFLAGS  += $(shell pkg-config --libs libusb-1.0)
 LDFLAGS  += -framework CoreMIDI -framework CoreFoundation -framework Foundation
 
-.PHONY: all clean install uninstall app test
+.PHONY: all clean install uninstall app test corpus
 
 # Delete a target whose recipe failed. Without this, a binary rejected by the
 # stamp check stays on disk newer than its sources, so the very next `make
@@ -62,6 +62,13 @@ app:
 test: | build
 	$(CC) $(CFLAGS) tests/midi_test.c src/nonap.m -o build/midi_test $(LDFLAGS)
 	./build/midi_test
+
+# Grades the splitter against 12,161 real frames captured from the STOCK vendor
+# driver (captures/usb/). Hand-written vectors cannot catch a wrong assumption
+# about what the device emits; this corpus can, because it IS what it emits.
+corpus: | build
+	$(CC) $(CFLAGS) tests/corpus_test.c src/nonap.m -o build/corpus_test $(LDFLAGS)
+	./build/corpus_test
 
 clean:
 	rm -f $(BIN)

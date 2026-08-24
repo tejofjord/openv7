@@ -113,8 +113,13 @@ int main(void) {
       i[k++]=0x00;
       expect("2-byte msg + terminator", i,k, w,2); }
 
-    /* Running status must not survive a frame boundary either: the byte after a
-       padding run belongs to the frame that is ending, never to the next one. */
+    /* Two frames that each hold COMPLETE messages. Note what this does and does
+       not prove: it passes whether or not the parser resets at the boundary,
+       which is exactly why it -- and every other frame test above -- missed the
+       spanning bug. It was originally named "no running status across frames"
+       and asserted that frames are self-contained. They are not; see the
+       spanning tests below. Kept because the terminator handling is still worth
+       pinning down. */
     { uint8_t i[90], w[] = {0xE0,0x71,0x75, 0xE0,0x1C,0x76};
       int k = 0;
       i[k++]=0xE0; i[k++]=0x71; i[k++]=0x75;
@@ -123,7 +128,44 @@ int main(void) {
       i[k++]=0xE0; i[k++]=0x1C; i[k++]=0x76;
       for (int j = 0; j < 38; j++) i[k++] = 0xFD;
       i[k++]=0x00;
-      expect("no running status across frames", i,k, w,6); }
+      expect("complete messages in adjacent frames", i,k, w,6); }
+
+    puts("  -- messages SPAN frames (verbatim from the vendor-driver capture) --");
+    /* Every frame test above uses self-contained frames, so all of them pass
+       under a parser that resets state at the boundary AND under one that does
+       not. They encoded the assumption instead of testing it, and the bug hid
+       underneath for a month.
+
+       These two frames are copied byte for byte out of
+       captures/usb/platter-frames.tsv (rows 100-101), captured from the stock
+       vendor driver. The first ENDS mid-message -- B0 00 14 then E0 1C, one
+       data byte short -- and the second OPENS with that missing byte, 0x0B.
+       11.7% of real frames look like this.
+
+       Resetting the parser at the boundary drops the E0 outright and orphans
+       the 0x0B, which is how 5.8% of the platter's timestamps went missing and
+       where the audible position jumps came from. */
+    { uint8_t i[84], w[] = {0xB0,0x00,0x14, 0xE0,0x1C,0x0B, 0xB0,0x00,0x16};
+      int k = 0;
+      i[k++]=0xB0; i[k++]=0x00; i[k++]=0x14; i[k++]=0xE0; i[k++]=0x1C;
+      for (int j = 0; j < 36; j++) i[k++] = 0xFD;
+      i[k++]=0x00;
+      i[k++]=0x0B; i[k++]=0xB0; i[k++]=0x00; i[k++]=0x16; i[k++]=0xE0; i[k++]=0x4D;
+      for (int j = 0; j < 35; j++) i[k++] = 0xFD;
+      i[k++]=0x00;
+      /* E0 4D is left pending on purpose: it completes in the NEXT frame. */
+      expect("message spanning a frame boundary", i,k, w,9); }
+
+    /* Running status must survive the boundary for the same reason. */
+    { uint8_t i[90], w[] = {0xB0,0x00,0x14, 0xB0,0x00,0x16};
+      int k = 0;
+      i[k++]=0xB0; i[k++]=0x00; i[k++]=0x14;
+      for (int j = 0; j < 38; j++) i[k++] = 0xFD;
+      i[k++]=0x00;
+      i[k++]=0x00; i[k++]=0x16;             /* running status, no repeated B0 */
+      for (int j = 0; j < 38; j++) i[k++] = 0xFD;
+      i[k++]=0x00;
+      expect("running status survives a frame", i,k, w,6); }
 
     printf(fails ? "\n%d FAILED\n" : "\nall passed\n", fails);
     return fails != 0;

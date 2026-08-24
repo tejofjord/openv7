@@ -241,13 +241,23 @@ static int midi_feed(struct midi_split *s, uint8_t x, uint8_t out[3]) {
        (0x00 inbound, docs/PROTOCOL.md) -- part of the container, not MIDI.
        Letting it reach the data-byte path is what fabricated a whole extra
        message after every 2-byte one, and put a bogus 0x00-LSB timestamp into
-       the platter stream 3.4% of the time. Frames are self-contained, so
-       running status is dropped at the boundary too: a data byte at the start
-       of a frame belongs to no previous message. */
+       the platter stream 3.4% of the time.
+
+       The 42-byte frame is a TRANSPORT container, not a message container, so
+       nothing else is reset here. This code used to clear status/ndata as well,
+       on the theory that frames are self-contained and a data byte opening a
+       frame belongs to no previous message. The vendor-driver capture disproves
+       that: 11.7% of frames begin mid-message (1419 of 12161 in
+       captures/usb/platter-frames.tsv). Clearing the parser threw those away --
+       708 of 12124 positions and 711 of 12124 timestamps, 5.8%, and it
+       manufactured 33 position jumps larger than 8 counts where the correct
+       parse has none. Those jumps are the audible ones. Strip the filler and
+       the terminator, keep parsing the byte stream underneath. */
     if (s->pad >= FRAME_PAD_MIN) {
-        s->pad = 0; s->status = 0; s->ndata = 0; s->insysex = 0;
+        s->pad = 0;
         if (x == 0x00) return 0;             /* swallow the terminator */
-        /* Anything else is already the next frame's first byte -- parse it. */
+        /* Anything else continues the stream -- a fresh status byte, or the
+           remaining data bytes of a message the previous frame started. */
     }
     s->pad = 0;
     if (x >= 0xF8) return 0;                 /* system realtime — ignore, running status survives */
