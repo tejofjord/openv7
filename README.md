@@ -180,7 +180,7 @@ The V7 exposes two vendor-specific USB interfaces. OpenV7:
 | [docs/HARDWARE.md](docs/HARDWARE.md) | The boards inside the deck, the platter's encoder path, and where the clocks come from |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | What is left |
 | [docs/HANDOFF-MAC.md](docs/HANDOFF-MAC.md) | Picking the work up on the Mac — what to change, in what order, and the traps that present as broken code |
-| [docs/HANDOFF-WINDOWS.md](docs/HANDOFF-WINDOWS.md) | **Start here to continue the work** — the open platter-jitter question, and the experiments only a Windows box can run |
+| [docs/HANDOFF-WINDOWS.md](docs/HANDOFF-WINDOWS.md) | **Start here to continue the work** — the Windows stack drives this deck cleanly, so it is the reference; how to extract what it does differently |
 
 `tools/win/` holds the Windows reverse-engineering harness used to measure the
 motor set (see [docs/CONTROL-MAP.md](docs/CONTROL-MAP.md) for how to run it).
