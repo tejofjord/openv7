@@ -42,6 +42,7 @@ static MIDIClientRef        g_client;
 static MIDIEndpointRef      g_source;   /* device -> apps */
 static MIDIEndpointRef      g_dest;     /* apps -> device */
 static volatile sig_atomic_t g_quit = 0;
+static int g_stall_exit = 0;   /* exit non-zero so the supervisor relaunches */
 static int g_verbose = 0;
 static int g_learn   = 0;
 static int g_diag    = 0;   /* --diag: print iso streaming rates once a second */
@@ -437,7 +438,34 @@ static void ploytec_rearm(void) {
 #define CLEAR_MAX 8
 static unsigned char g_clear_q[CLEAR_MAX];
 static int g_nclear = 0;
+static long now_ms(void);
+/* Stall detection, third attempt -- the first two failed for instructive reasons.
+   A continuous run of submit failures never materialises (clear_halt "succeeds",
+   the next submit succeeds, the transfer then completes stalled). And counting
+   stalls alone needs a threshold, which needs the rate: measured, it is about
+   TWO per second, so any window/threshold pair tuned for a fast failure never
+   fires.
+
+   What is unambiguous is the CONJUNCTION: stalls are occurring AND no control
+   data has arrived for several seconds. Neither half alone is safe -- an idle V7
+   legitimately sends nothing for minutes (docs/PROTOCOL.md), so silence by
+   itself must never trigger a reset. */
+static long g_pipe_win_ms;             /* start of the current stall window */
+static int  g_pipe_hits;               /* stalls seen inside it */
+static long g_last_data_ms;            /* last control-IN completion WITH data */
+#define STALL_WINDOW_MS  5000
+#define STALL_HITS       3             /* more than a one-off blip */
+#define STALL_QUIET_MS   4000          /* ...and nothing has arrived meanwhile */
+
 static void clear_halt_later(unsigned char ep) {
+    /* Count EVERY stall here, whichever path found it. Counting submit failures
+       alone missed the fault entirely: a stalled pipe often submits fine and
+       then COMPLETES with LIBUSB_TRANSFER_STALL, so arm_bulk saw nothing wrong
+       while no data moved at all. Both paths call this function. */
+    long now = now_ms();
+    if (!g_pipe_win_ms || now - g_pipe_win_ms > STALL_WINDOW_MS) { g_pipe_win_ms = now; g_pipe_hits = 0; }
+    g_pipe_hits++;
+
     for (int i = 0; i < g_nclear; i++) if (g_clear_q[i] == ep) return;   /* already queued */
     if (g_nclear < CLEAR_MAX) g_clear_q[g_nclear++] = ep;
 }
@@ -501,6 +529,32 @@ static struct libusb_transfer *g_t_aux = NULL;
 static int g_in_live[CTRL_IN_NXFER];
 static int g_aux_live = 0;
 static long g_ctrl_bytes = 0;          /* control-IN traffic, for --diag */
+
+/* Stall detection. A stalled control-IN pipe used to be permanent: arm_bulk
+   retries forever, clear_halt reports success without fixing anything, and the
+   process stays up -- so the menu bar keeps saying "connected" while not one
+   MIDI byte flows. Seen 323 times in a single launch.
+
+   The signal is a CONTINUOUS run of PIPE submit failures, not silence: an idle
+   V7 legitimately sends nothing at all (docs/PROTOCOL.md -- 10 minutes of idle
+   produced zero messages), so "no data" must never trigger recovery.
+
+   Recovery is a USB port reset followed by a FRESH process. src/main.c used to
+   warn that libusb_reset_device leaves the platter encoder un-armed; measured
+   again on a wedged device, a reset plus a new bring-up restored it completely
+   -- 0 PIPE errors and ~907 platter frames/s. The reset invalidates this
+   handle, so exit and let the supervisor relaunch rather than carrying on. */
+/* Counted over a WINDOW, not as an unbroken run. The first version of this
+   tracked a continuous streak and never once fired, because a stalled pipe does
+   not fail cleanly: clear_halt reports success, the next submit succeeds, the
+   transfer then COMPLETES stalled, and round it goes. A submit succeeds inside
+   every couple of seconds, which reset the streak forever. Rate is the honest
+   signal -- a healthy bridge produces zero of these. */
+
+static long now_ms(void) {
+    struct timeval tv; gettimeofday(&tv, NULL);
+    return tv.tv_sec * 1000L + tv.tv_usec / 1000;
+}
 /* Last-complained-at, one clock PER ENDPOINT. A single shared static meant a
    persistently failing pipe griped once a second and silenced every OTHER
    pipe's message for that same second -- so a second endpoint failing at the
@@ -666,6 +720,7 @@ static void LIBUSB_CALL ctrl_in_cb(struct libusb_transfer *t) {
     g_in_live[idx] = 0;                                /* no longer in flight */
     if (t->status == LIBUSB_TRANSFER_COMPLETED) {
         g_ctrl_bytes += t->actual_length;
+        if (t->actual_length > 0) g_last_data_ms = now_ms();   /* the pipe is genuinely alive */
         uint8_t out[3];
         if (g_batch_frame) batch_begin();
         for (int i = 0; i < t->actual_length; i++) {
@@ -815,9 +870,12 @@ int main(int argc, char **argv) {
     if (libusb_init(&g_ctx) < 0) { fprintf(stderr, "libusb init failed\n"); return 1; }
     g_dev = libusb_open_device_with_vid_pid(g_ctx, V7_VID, V7_PID);
     if (!g_dev) { fprintf(stderr, "Numark V7 not found (is it plugged in and powered on?)\n"); return 2; }
-    /* DO NOT call libusb_reset_device() here. A USB port reset re-enumerates the
-       device but leaves the platter-encoder subsystem un-armed: the control
-       stream still emits its idle heartbeat, yet jog/platter frames never come.
+    /* DO NOT call libusb_reset_device() here -- on the bring-up path. (The stall
+       recovery below does reset, deliberately, as a last resort.) Re-measured
+       2026-08-24 on a wedged deck: a reset followed by a FRESH process does
+       restore the platter encoder, buttons and faders, contrary to what this
+       comment used to claim. What it does NOT restore is the MOTOR, which stays
+       deaf to every start command until the deck is power-cycled.
        Proven via an A/B test on real hardware — motor-spin with a fresh bring-up
        streamed 315 encoder frames; the identical bring-up preceded by
        reset_device streamed 1. The device is instead kept clean across sessions
@@ -907,6 +965,7 @@ int main(int argc, char **argv) {
         fprintf(stderr, "OpenV7: LEARN mode — touch every control once, then Ctrl-C for the map.\n");
     else
         fprintf(stderr, "OpenV7: running. Select \"Numark V7\" in your DJ app. Ctrl-C to stop.\n");
+    g_last_data_ms = now_ms();
 
     long diag_o0 = 0, diag_i0 = 0; time_t diag_t = time(NULL), rearm_t = time(NULL);
     time_t jog_t = time(NULL);
@@ -916,6 +975,31 @@ int main(int argc, char **argv) {
         struct timeval tv = { 0, 20000 };
         libusb_handle_events_timeout(g_ctx, &tv);
         clear_halt_drain();     /* stall recovery, deferred out of the callbacks */
+        /* Escalate a pipe that clear_halt cannot fix. Without this the bridge
+           spins on PIPE indefinitely while reporting itself healthy. */
+        if (g_pipe_hits >= STALL_HITS && g_last_data_ms &&
+            now_ms() - g_last_data_ms > STALL_QUIET_MS) {
+            fprintf(stderr, "OpenV7: %d pipe stalls in %ldms and clear-halt did not fix it — "
+                            "resetting the device and restarting.\n",
+                    g_pipe_hits, now_ms() - g_pipe_win_ms);
+            /* A port reset restores the CONTROL path -- encoder, buttons and
+               faders all report again after the fresh bring-up, measured on
+               hardware. It does NOT restore the MOTOR: the deck ignores every
+               documented start command afterwards (instant, soft, and the full
+               stop/latch/RPM/start sequence) until it is power-cycled, while
+               still happily sending button and platter messages.
+
+               That is the real shape of the warning this file used to carry.
+               The warning named the platter encoder, which does come back; the
+               motor is what does not. Resetting is still the right call when the
+               alternative is a control stream that is dead for the rest of the
+               session -- but it is not free, and the operator has to be told. */
+            libusb_reset_device(g_dev);   /* invalidates the handle: exit, do not continue */
+            fprintf(stderr, "OpenV7: control restored. MOTOR control needs a power cycle "
+                            "of the deck -- a USB reset does not re-arm it.\n");
+            g_stall_exit = 1;
+            g_quit = 1;
+        }
         if (g_toggle_ts) {      /* SIGUSR1: flip the timestamp filter in place */
             g_toggle_ts = 0;
             g_send_timestamps = !g_send_timestamps;
@@ -1045,5 +1129,7 @@ int main(int argc, char **argv) {
     MIDIClientDispose(g_client);
     libusb_close(g_dev);
     libusb_exit(g_ctx);
-    return 0;
+    /* Non-zero after a stall reset so the supervising app relaunches us into a
+       full fresh bring-up, which is what actually clears the fault. */
+    return g_stall_exit ? 3 : 0;
 }
