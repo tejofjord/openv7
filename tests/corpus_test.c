@@ -24,18 +24,39 @@
 #include "../src/main.c"
 #undef main
 
-#define CORPUS "captures/usb/platter-frames.tsv"
-/* Measured on the reference capture; see docs/PROTOCOL.md. */
-#define WANT_POS   12124
-#define WANT_TS    12124
-#define WANT_JUMPS 0
+/* Two corpora, both captured from the stock vendor driver on Windows where
+   VirtualDJ has no hiccups. The second is the harder case and the one that
+   matters: it was taken while VirtualDJ actually played and scratched, so it
+   contains direction reversals (4.4% backwards steps) rather than steady
+   rotation only. Expected counts come from a correct stream parse, cross-checked
+   against tools/win/parse-control-stream.ps1.
 
-int main(void) {
-    FILE *f = fopen(CORPUS, "r");
-    if (!f) { fprintf(stderr, "corpus: cannot open %s (run from the repo root)\n", CORPUS); return 2; }
+   MAX_STEP is the largest position delta the deck genuinely produces. It exists
+   to pin down the claim in docs/PROTOCOL.md that the 7-bit counter's 64-count
+   ambiguity cannot fire on a host that keeps up: even under scratching the
+   worst step is 10, leaving ~6x headroom. If a parser regression starts losing
+   frames, this is what notices. */
+struct corpus {
+    const char *path; int gz;
+    int frames, pos, ts, max_step;
+};
+static const struct corpus CORPORA[] = {
+    { "captures/usb/platter-frames.tsv",       0, 12161, 12124, 12124,  3 },
+    { "captures/vdj/vdj-inbound-0x83.tsv.gz",  1, 68678, 68513, 68513, 10 },
+};
+#define AMBIGUOUS 64        /* half the 7-bit range: steps this large are undecidable */
+
+static int grade(const struct corpus *c) {
+    FILE *f;
+    if (c->gz) {
+        char cmd[512];
+        snprintf(cmd, sizeof cmd, "gzip -dc '%s'", c->path);
+        f = popen(cmd, "r");
+    } else f = fopen(c->path, "r");
+    if (!f) { fprintf(stderr, "corpus: cannot open %s (run from the repo root)\n", c->path); return 2; }
 
     struct midi_split s = {0};
-    int frames = 0, spanning = 0, pos = 0, ts = 0, jumps = 0, back = 0;
+    int frames = 0, spanning = 0, pos = 0, ts = 0, ambig = 0, back = 0, worst = 0;
     int last = -1;
     long dsum = 0; int dn = 0;
     char line[256];
@@ -65,31 +86,43 @@ int main(void) {
                     int d = out[2] - last;
                     if (d < -64) d += 128;      /* the 7-bit counter wraps */
                     if (d >  64) d -= 128;
-                    dsum += (d < 0 ? -d : d); dn++;
+                    int a = d < 0 ? -d : d;
+                    dsum += a; dn++;
                     if (d < 0) back++;
-                    if (d > 8 || d < -8) jumps++;
+                    if (a > worst) worst = a;
+                    if (a >= AMBIGUOUS) ambig++;
                 }
                 last = out[2];
             } else if ((out[0] & 0xF0) == 0xE0) ts++;
         }
     }
-    fclose(f);
+    if (c->gz) pclose(f); else fclose(f);
 
     double mean = dn ? (double)dsum / dn : 0.0;
-    printf("corpus: %s\n", CORPUS);
-    printf("  frames                 %d\n", frames);
+    printf("%s\n", c->path);
+    printf("  frames                 %-6d  want %d\n", frames, c->frames);
     printf("  opening mid-message    %d (%.1f%%)\n", spanning, frames ? 100.0*spanning/frames : 0.0);
-    printf("  positions (B0 00)      %d   want %d\n", pos, WANT_POS);
-    printf("  timestamps (E0)        %d   want %d\n", ts, WANT_TS);
+    printf("  positions (B0 00)      %-6d  want %d\n", pos, c->pos);
+    printf("  timestamps (E0)        %-6d  want %d\n", ts, c->ts);
     printf("  mean |delta|           %.3f counts\n", mean);
     printf("  backwards deltas       %d (%.2f%%)\n", back, dn ? 100.0*back/dn : 0.0);
-    printf("  jumps > 8 counts       %d   want %d\n", jumps, WANT_JUMPS);
+    printf("  largest step           %-6d  want <= %d\n", worst, c->max_step);
+    printf("  steps >= %d (ambiguous) %-6d  want 0\n", AMBIGUOUS, ambig);
 
     int bad = 0;
-    if (pos   != WANT_POS)   { printf("\nFAIL: lost %d positions -- the parser is discarding real data\n", WANT_POS - pos); bad = 1; }
-    if (ts    != WANT_TS)    { printf("FAIL: lost %d timestamps -- jog velocity will be wrong\n", WANT_TS - ts); bad = 1; }
-    if (pos   != ts)         { printf("FAIL: %d positions but %d timestamps -- they pair 1:1 on the wire\n", pos, ts); bad = 1; }
-    if (jumps != WANT_JUMPS) { printf("FAIL: %d fabricated position jumps -- these are the audible ones\n", jumps); bad = 1; }
-    puts(bad ? "\nCORPUS FAILED" : "\ncorpus ok");
+    if (frames != c->frames) { printf("  FAIL: read %d frames, expected %d\n", frames, c->frames); bad = 1; }
+    if (pos    != c->pos)    { printf("  FAIL: lost %d positions -- the parser is discarding real data\n", c->pos - pos); bad = 1; }
+    if (ts     != c->ts)     { printf("  FAIL: lost %d timestamps -- jog velocity will be wrong\n", c->ts - ts); bad = 1; }
+    if (pos    != ts)        { printf("  FAIL: %d positions but %d timestamps -- they pair 1:1 on the wire\n", pos, ts); bad = 1; }
+    if (worst  > c->max_step){ printf("  FAIL: step of %d counts -- the deck does not move that fast; frames were lost\n", worst); bad = 1; }
+    if (ambig  != 0)         { printf("  FAIL: %d undecidable steps -- see PROTOCOL.md, these should never occur\n", ambig); bad = 1; }
+    puts(bad ? "  FAILED\n" : "  ok\n");
     return bad;
+}
+
+int main(void) {
+    int bad = 0;
+    for (size_t i = 0; i < sizeof CORPORA / sizeof *CORPORA; i++) bad |= grade(&CORPORA[i]);
+    puts(bad ? "CORPUS FAILED" : "corpus ok");
+    return bad != 0;
 }
