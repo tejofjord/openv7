@@ -400,22 +400,75 @@ Note the "no inputs" claim in earlier revisions of this file was wrong — the
 vendor driver exposes a capture endpoint. Channel count for the V7 specifically
 is not established; the Ploytec codec core is 8-channel.
 
+## ✅ Frame framing — MIDI messages span 42-byte frames
+
+**A message begun near the end of one frame continues in the next.** In a real
+capture **11.7 %** of frames start with a leftover data byte belonging to the
+previous frame's message:
+
+```
+frame N     b0 00 16   e0 4d             fd..fd 00     <- pitch-bend MSB absent
+frame N+1   0b         b0 00 18  e0 02   fd..fd 00     <- it is here
+            ^ that MSB
+```
+
+The 42-byte frame is a **transport container, not a message container**. The
+correct procedure is:
+
+1. take each frame's payload
+2. strip the `0xFD` filler and the trailing `0x00` terminator
+3. concatenate the remainder into one continuous byte stream
+4. run an ordinary MIDI parser over that stream
+
+Parsing frames independently corrupts roughly **one message in six**, and the
+damage lands on the `0xE0` pitch-bend — exactly the value a host uses for jog
+timing. The difference is stark, over the same 12,161 captured frames:
+
+| | per-frame parse | stream parse |
+|---|---|---|
+| Resync errors | — | **0** |
+| `B0 00` value range | 0..**253** (impossible) | 0..**127** ✅ |
+| Delta per message | garbage | mean **1.984**, min −1, max 3 |
+| CC : pitch-bend pairing | broken | **12124 : 12124**, exact |
+
+Reproduce with `tools/win/parse-control-stream.ps1`, whose header documents the
+trap in full.
+
 ## The platter stream, as a consumer sees it
 
 Measured on hardware, motor-driven at 33.34 RPM (derived from the counter, not
 assumed — see [HARDWARE.md](HARDWARE.md)).
 
-### Reporting rate is not 1 kHz
+### ⚠️ Reporting rate IS 1 kHz — corrected
 
-The deck emits about **936 position frames per second**, not the 1000 that "one
-frame per USB frame" implies, and the shortfall arrives as bursts of roughly
-17 ms with nothing at all. No encoder ticks are lost — the FPGA counts in
-hardware and the summed deltas recover true rotation exactly — but a consumer
-that assumes a steady 1 kHz will be wrong several times a second.
+> **This section previously claimed the deck emits ~936 frames/s with ~17 ms
+> gaps, and that this was inherent to the hardware. That is wrong.** A USBPcap
+> capture of the **stock vendor driver** driving the same deck shows otherwise.
 
-This rate did not move for anything on the host side: control-IN queue depth
-(1, 2, 4, 8, 16), keepalives on or off, verbose logging on or off. Two of those
-made it *worse* and none made it better.
+Measured from `captures/usb/idle-USBPcap1-control.pcap`, 10 s of steady
+motor-driven rotation, 9,999 intervals:
+
+| | Vendor driver (measured) | OpenV7 on macOS (previously documented) |
+|---|---|---|
+| Frame rate | **exactly 1000/s** — 1000 in every one-second bucket, 11 s running | ~936/s |
+| Max gap | **1.675 ms** | ~17 ms bursts |
+| p50 / p99 / p99.9 | 1.009 / 1.449 / 1.554 ms | — |
+| Gaps ≥ 5 ms | **0** | — |
+| Gaps ≥ 17 ms | **0** | several per second |
+
+**The deck emits one control frame per USB frame, exactly.** It is capable of a
+rock-steady 1 kHz and delivers it when the host keeps up.
+
+So the ~936/s and the 17 ms bursts are **not** device behaviour — they are a
+property of the macOS/OpenV7 path, which is losing roughly **6.4 % of frames in
+bursts**. The earlier note that the rate "did not move for anything on the host
+side" (queue depths 1–16, keepalives, logging) means those were the wrong knobs,
+not that the rate was fixed by the hardware.
+
+This matters because the old framing led somewhere unproductive: if ~17 ms gaps
+were inherent, a host would have to tolerate them, and the search moves to wrap
+handling and interpolation. They are not inherent, so the useful question is
+**why the bridge drops frames the vendor driver does not**.
 
 ### The 7-bit position counter is ambiguous across long gaps
 

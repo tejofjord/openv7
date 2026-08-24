@@ -20,6 +20,10 @@ tools/win/OpenV7Midi.dll
 # probe reports are regenerated; findings live in docs/
 captures/motor-probe.md
 captures/pitch-probe.md
+# Unfiltered USBPcap captures - ~309 MB, and one of them is 192 MB, which is
+# past GitHub's hard 100 MB per-file limit. Almost all of that is isochronous
+# audio padding. The control traffic filtered out of them lives in
+# captures/usb/ and IS tracked - see captures/usb/README.md.
 captures/raw/
 tools/win/OpenV7Wasapi.dll
 captures/cam/
