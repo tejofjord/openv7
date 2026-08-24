@@ -1,7 +1,7 @@
 # V7 hardware — what the board actually does
 
 Derived from the Numark V7 (NK14) service manual, Rev 1 (2010-04-13), which is
-included in this repository, and from measurements on real hardware.
+included in this repository as [`V7-Service-Manual-Rev1-2010.pdf`](V7-Service-Manual-Rev1-2010.pdf), and from measurements on real hardware.
 
 **Why the manual is here.** The V7 was discontinued and its driver abandoned at
 macOS 10.12 (2016); on Apple Silicon the hardware is a brick with no vendor

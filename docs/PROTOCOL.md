@@ -399,3 +399,58 @@ the audio packet layout), and what still has to be measured on a V7.
 Note the "no inputs" claim in earlier revisions of this file was wrong — the
 vendor driver exposes a capture endpoint. Channel count for the V7 specifically
 is not established; the Ploytec codec core is 8-channel.
+
+## The platter stream, as a consumer sees it
+
+Measured on hardware, motor-driven at 33.34 RPM (derived from the counter, not
+assumed — see [HARDWARE.md](HARDWARE.md)).
+
+### Reporting rate is not 1 kHz
+
+The deck emits about **936 position frames per second**, not the 1000 that "one
+frame per USB frame" implies, and the shortfall arrives as bursts of roughly
+17 ms with nothing at all. No encoder ticks are lost — the FPGA counts in
+hardware and the summed deltas recover true rotation exactly — but a consumer
+that assumes a steady 1 kHz will be wrong several times a second.
+
+This rate did not move for anything on the host side: control-IN queue depth
+(1, 2, 4, 8, 16), keepalives on or off, verbose logging on or off. Two of those
+made it *worse* and none made it better.
+
+### The 7-bit position counter is ambiguous across long gaps
+
+`B0 00 vv` is a **7-bit** absolute counter, so it wraps every 128 counts — about
+**64 ms** at 33 RPM. Turning it into absolute motion requires assuming each step
+is less than half the range. Measured, steps of **64 or more counts occur about
+1.3 times a second** (observed: 64, 65, 66, 67, 68, 70, 78, 84, 93, 103).
+
+Each of those is genuinely undecidable: +66 forward and −62 backward are the
+same byte. A consumer that guesses wrong moves the playhead by up to a third of
+a revolution. On a motorized deck, where the platter *is* the transport, that is
+an audible jump rather than a small error.
+
+Serato documents track skipping on the V7/NS7/NS7II as a
+[known issue](https://support.serato.com/hc/en-us/articles/203682530) with their
+own driver and software, which is consistent with this being inherent to the
+encoding rather than specific to any one host.
+
+### The 0xE0 timestamp has never been consumed by any host
+
+The timestamp is real and precise — `11.2896 MHz ÷ 4`, median interval 2822
+units against 2825 theoretical, p25/p75 within ±7. Combined with the host clock
+to resolve its 5.8 ms wrap, it yields velocity accurate to **0.1%**, against
+**15%** for velocity timed from message arrival alone (measured offline over
+~12,000 intervals).
+
+No known host uses it:
+
+- **VirtualDJ** has no concept of a device-supplied timestamp in its controller
+  definition format, and computes jog velocity from received values.
+- **Mixxx**'s V7 mapping never got the jog working; the community reported being
+  unable to decipher the pitch-bend values.
+- A working third-party V7 mapping (Bome MIDI Translator → OtsAV) shipped by
+  **discarding** `0xE0` entirely and using position deltas with wrap handling.
+
+Suppressing `0xE0` on this bridge kills the jog in VirtualDJ outright while
+`B0 00` keeps streaming at ~960/s, so VirtualDJ does require the messages —
+what it does with their contents is not established.
