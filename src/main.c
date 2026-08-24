@@ -26,6 +26,7 @@
 #include <pthread.h>
 #include <pthread/qos.h>
 #include <sys/resource.h>
+#include <mach/mach_time.h>
 #include <libusb.h>
 #include <CoreMIDI/CoreMIDI.h>
 #include <CoreFoundation/CoreFoundation.h>
@@ -36,6 +37,14 @@
 extern void openv7_prevent_appnap(void);
 
 /* ---- globals ---- */
+/* --replay: feed a recorded frame capture into CoreMIDI instead of the device,
+   so the whole downstream path can be tested with no hardware attached. */
+static const char *g_replay_path;
+static int         g_replay_loop;
+/* --legacy-parse: restore the frame-boundary reset midi_feed used to do, purely
+   so the fixed and broken parsers can be A/B'd from one binary against the same
+   recorded stream. Off by default; nothing but replay should ever set it. */
+static int         g_legacy_parse;
 static libusb_context     *g_ctx;
 static libusb_device_handle *g_dev;
 static MIDIClientRef        g_client;
@@ -255,6 +264,8 @@ static int midi_feed(struct midi_split *s, uint8_t x, uint8_t out[3]) {
        the terminator, keep parsing the byte stream underneath. */
     if (s->pad >= FRAME_PAD_MIN) {
         s->pad = 0;
+        /* The bug, kept switchable for A/B only -- see --legacy-parse. */
+        if (g_legacy_parse) { s->status = 0; s->ndata = 0; s->insysex = 0; }
         if (x == 0x00) return 0;             /* swallow the terminator */
         /* Anything else continues the stream -- a fresh status byte, or the
            remaining data bytes of a message the previous frame started. */
@@ -294,6 +305,107 @@ static void midi_to_apps(const uint8_t *msg, int len) {
     MIDIPacket *p = MIDIPacketListInit(pl);
     p = MIDIPacketListAdd(pl, sizeof(buf), p, 0, len, msg);
     if (p) MIDIReceived(g_source, pl);
+}
+
+/* ---- --replay: play a recorded capture into CoreMIDI, with no device ------
+
+   The point is to hold the BYTE STREAM constant while everything around it
+   changes. captures/vdj/vdj-inbound-0x83.tsv.gz is 68,678 inbound frames with
+   arrival timestamps, taken off the wire while the stock Windows driver fed
+   VirtualDJ and the audio was clean. Replaying it here puts that exact stream
+   through our parser, our CoreMIDI source and VirtualDJ's macOS build, so
+   whatever remains is downstream of the bytes.
+
+   Paired with --legacy-parse this is a controlled A/B: same recording, same
+   timing, one variable. If the broken parser hiccups and the fixed one does
+   not, the parser was the audible fault and no hardware was needed to show it.
+
+   Timing uses mach_wait_until. nanosleep resolves to the scheduler quantum,
+   which was measured at 140-907 us of error on this machine -- most of a frame
+   period at 1 kHz, so it would smear the very cadence being reproduced. */
+static int  g_diag_jog;                              /* defined below */
+static int  forward_to_apps(const uint8_t *msg);      /* defined below */
+static void jog_stat(const uint8_t *m, int n);       /* defined below */
+
+static uint64_t g_mach_num = 1, g_mach_den = 1;
+static uint64_t us_to_mach(uint64_t us) {
+    return us * 1000ULL * g_mach_den / g_mach_num;
+}
+
+struct rframe { double t; uint8_t b[42]; int n; };
+
+static int replay_run(const char *path) {
+    size_t len = strlen(path);
+    int gz = len > 3 && !strcmp(path + len - 3, ".gz");
+    FILE *f;
+    if (gz) {
+        char cmd[1024];
+        snprintf(cmd, sizeof cmd, "gzip -dc '%s'", path);
+        f = popen(cmd, "r");
+    } else f = fopen(path, "r");
+    if (!f) { fprintf(stderr, "OpenV7: cannot open %s\n", path); return 2; }
+
+    /* Read the whole capture before playing any of it: file I/O during
+       playback would inject exactly the jitter this is trying to measure. */
+    size_t cap = 4096, nfr = 0;
+    struct rframe *fr = malloc(cap * sizeof *fr);
+    if (!fr) { fprintf(stderr, "OpenV7: out of memory\n"); return 5; }
+    char line[512];
+    while (fgets(line, sizeof line, f)) {
+        char *p1 = strchr(line, '\t'); if (!p1) continue;
+        char *p2 = strchr(p1 + 1, '\t'); if (!p2) continue;
+        int n = atoi(p1 + 1);
+        if (n <= 0 || n > 42) continue;
+        if (nfr == cap) {
+            cap *= 2;
+            struct rframe *t = realloc(fr, cap * sizeof *fr);
+            if (!t) { free(fr); fprintf(stderr, "OpenV7: out of memory\n"); return 5; }
+            fr = t;
+        }
+        fr[nfr].t = atof(line);
+        fr[nfr].n = n;
+        for (int i = 0; i < n; i++) { unsigned v; sscanf(p2 + 1 + 2*i, "%2x", &v); fr[nfr].b[i] = (uint8_t)v; }
+        nfr++;
+    }
+    if (gz) pclose(f); else fclose(f);
+    if (!nfr) { fprintf(stderr, "OpenV7: %s holds no frames\n", path); free(fr); return 2; }
+
+    double span = fr[nfr-1].t - fr[0].t;
+    fprintf(stderr, "OpenV7: replaying %zu frames over %.1fs from %s%s\n",
+            nfr, span, path, g_legacy_parse ? "  [LEGACY PARSER]" : "");
+
+    mach_timebase_info_data_t tb; mach_timebase_info(&tb);
+    g_mach_num = tb.numer; g_mach_den = tb.denom;
+
+    long msgs = 0, pass = 0;
+    do {
+        struct midi_split ms = {0};
+        uint64_t t0 = mach_absolute_time();
+        double base = fr[0].t;
+        for (size_t i = 0; i < nfr && !g_quit; i++) {
+            uint64_t due = t0 + us_to_mach((uint64_t)((fr[i].t - base) * 1e6));
+            if (due > mach_absolute_time()) mach_wait_until(due);
+            uint8_t out[3];
+            for (int j = 0; j < fr[i].n; j++) {
+                int n = midi_feed(&ms, fr[i].b[j], out);
+                if (n <= 0) continue;
+                msgs++;
+                if (!forward_to_apps(out)) continue;
+                midi_to_apps(out, n);
+                if (g_diag_jog) jog_stat(out, n);
+                if (g_verbose) {
+                    fprintf(stderr, "  in  ");
+                    for (int k = 0; k < n; k++) fprintf(stderr, "%02x ", out[k]);
+                    fprintf(stderr, "\n");
+                }
+            }
+        }
+        pass++;
+        fprintf(stderr, "OpenV7: pass %ld done — %ld messages\n", pass, msgs);
+    } while (g_replay_loop && !g_quit);
+
+    free(fr);
+    return 0;
 }
 
 /* Batched variant: build one packet list across a whole transfer, flush once. */
@@ -846,10 +958,17 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--no-timestamps")) g_send_timestamps = 0;
         else if (!strcmp(argv[i], "--no-keepalive")) g_keepalive = 0;
         else if (!strcmp(argv[i], "--supervised")) g_supervised = 1;
+        else if (!strcmp(argv[i], "--replay")) {
+            if (i + 1 >= argc) { fprintf(stderr, "OpenV7: --replay needs a capture file\n"); return 1; }
+            g_replay_path = argv[++i];
+        }
+        else if (!strcmp(argv[i], "--replay-loop")) g_replay_loop = 1;
+        else if (!strcmp(argv[i], "--legacy-parse")) g_legacy_parse = 1;
         else if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help")) {
             printf("OpenV7 — Numark V7 userspace driver\n"
                    "usage: openv7 [-v|--verbose] [--learn] [--diag] [--diag-jog]\n"
                    "       [--no-timestamps] [--no-keepalive]\n"
+                   "       [--replay FILE [--replay-loop] [--legacy-parse]]\n"
                    "  -v        print decoded MIDI as it arrives\n"
                    "  --learn   catalog each control once (touch every control, Ctrl-C for the map)\n"
                    "  --diag    print isochronous stream health once a second (~200/~62 = healthy)\n"
@@ -866,6 +985,17 @@ int main(int argc, char **argv) {
                    "            0x04 + 2 s EP0 re-arm). They are ON by default: without them the\n"
                    "            control stream has been seen to deliver nothing at all from\n"
                    "            launch. Only for A/B testing that fault.\n"
+                   "  --replay FILE\n"
+                   "            play a recorded frame capture into CoreMIDI instead of opening\n"
+                   "            the device. Needs no hardware. FILE is timestamp/len/hex TSV,\n"
+                   "            .gz accepted — see captures/vdj/vdj-inbound-0x83.tsv.gz, which\n"
+                   "            was taken while the stock Windows driver fed VirtualDJ cleanly.\n"
+                   "  --replay-loop\n"
+                   "            repeat the capture until interrupted\n"
+                   "  --legacy-parse\n"
+                   "            restore the frame-boundary reset midi_feed used to do, which\n"
+                   "            discarded every message spanning two frames (5.8%% of them).\n"
+                   "            For A/B against --replay only: same recording, one variable.\n"
                    "  --supervised\n"
                    "            exit when the launching parent process goes away, instead of\n"
                    "            lingering as an orphan that holds the USB interfaces and blocks\n"
@@ -893,6 +1023,21 @@ int main(int argc, char **argv) {
        background/menu-bar parent can't nap the isochronous stream. Defensive —
        the stream is healthy without it, but it costs nothing to keep. */
     openv7_prevent_appnap();
+
+    /* --replay needs the CoreMIDI half of the bridge and nothing else: no
+       device, no handshake, no iso ring. Everything downstream of the bytes is
+       still exercised, which is the whole point. */
+    if (g_replay_path) {
+        MIDIClientCreate(CFSTR("OpenV7"), NULL, NULL, &g_client);
+        MIDISourceCreate(g_client, CFSTR("Numark V7"), &g_source);
+        MIDIDestinationCreate(g_client, CFSTR("Numark V7"), dest_read, NULL, &g_dest);
+        fprintf(stderr, "OpenV7: CoreMIDI device \"Numark V7\" is live (replay; no device attached).\n");
+        int rc = replay_run(g_replay_path);
+        MIDIEndpointDispose(g_source);
+        MIDIEndpointDispose(g_dest);
+        MIDIClientDispose(g_client);
+        return rc;
+    }
 
     if (libusb_init(&g_ctx) < 0) { fprintf(stderr, "libusb init failed\n"); return 1; }
     g_dev = libusb_open_device_with_vid_pid(g_ctx, V7_VID, V7_PID);
