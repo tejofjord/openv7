@@ -1,0 +1,300 @@
+﻿**********************
+Windows PowerShell transcript start
+Start time: 20260824214522
+Username: HADIDA-WINDOWS\Michael
+RunAs User: HADIDA-WINDOWS\Michael
+Configuration Name: 
+Machine: HADIDA-WINDOWS (Microsoft Windows NT 10.0.26200.0)
+Host Application: C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\Users\Michael\dev\openv7\tools\win\finish-windows.ps1
+Process ID: 20164
+PSVersion: 5.1.26100.8115
+PSEdition: Desktop
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1.26100.8115
+BuildVersion: 10.0.26100.8115
+CLRVersion: 4.0.30319.42000
+WSManStackVersion: 3.0
+PSRemotingProtocolVersion: 2.3
+SerializationVersion: 1.1.0.1
+**********************
+
+====================================================================
+ PHASE 1 - STRIP SEARCH - what happens on release?
+====================================================================
+   1. slow drag end to end, then LIFT your finger
+   2. tap the middle, lift
+   3. tap one end, lift; tap the other end, lift
+   4. press and hold still ~3 s, then lift
+
+   starting in 5 seconds...
+     60s
+     59s
+     58s
+     57s
+     56s
+     55s
+     54s
+     53s
+     52s
+     51s
+     50s
+     49s
+     48s
+     47s
+     46s
+     45s
+     44s
+     43s
+     42s
+     41s
+     40s
+     39s
+     38s
+     37s
+     36s
+     35s
+     34s
+     33s
+     32s
+     31s
+     30s
+     29s
+     28s
+     27s
+     26s
+     25s
+     24s
+     23s
+     22s
+     21s
+     20s
+     19s
+     18s
+     17s
+     16s
+     15s
+     14s
+     13s
+     12s
+     11s
+     10s
+      9s
+      8s
+      7s
+      6s
+      5s
+      4s
+      3s
+      2s
+      1s
+    done.
+
+  strip messages: 163
+   gesture 1
+     n=65   first=119  LAST=1    range 1..126
+   gesture 2
+     n=3    first=2    LAST=27   range 2..27
+   gesture 3
+     n=54   first=28   LAST=126  range 28..126
+   gesture 4
+     n=5    first=125  LAST=1    range 1..125
+   gesture 5
+     n=1    first=0    LAST=0    range 0..0
+   gesture 6
+     n=4    first=75   LAST=78   range 75..78
+   gesture 7
+     n=2    first=77   LAST=76   range 76..77
+   gesture 8
+     n=4    first=77   LAST=1    range 1..78
+   gesture 9
+     n=1    first=0    LAST=0    range 0..0
+   gesture 10
+     n=4    first=27   LAST=26   range 26..28
+   gesture 11
+     n=3    first=28   LAST=0    range 0..28
+   gesture 12
+     n=4    first=117  LAST=124  range 117..124
+   gesture 13
+     n=4    first=123  LAST=0    range 0..123
+   gesture 14
+     n=4    first=78   LAST=94   range 78..94
+   gesture 15
+     n=5    first=93   LAST=0    range 0..93
+
+  KEY: if every LAST value is 0, releasing sends zero and a naive
+  mapping jumps the track to the start on every finger-lift.
+
+====================================================================
+ PHASE 2 - LIBRARY TRIO - press in THIS order
+====================================================================
+   1. CRATES     (wait ~3 s)
+   2. PREPARE    (wait ~3 s)
+   3. FILES
+
+   starting in 5 seconds...
+     40s
+     39s
+     38s
+     37s
+     36s
+     35s
+     34s
+     33s
+     32s
+     31s
+     30s
+     29s
+     28s
+     27s
+     26s
+     25s
+     24s
+     23s
+     22s
+     21s
+     20s
+     19s
+     18s
+     17s
+     16s
+     15s
+     14s
+     13s
+     12s
+     11s
+     10s
+      9s
+      8s
+      7s
+      6s
+      5s
+      4s
+      3s
+      2s
+      1s
+    done.
+
+  arrival order:
+   1. +     0s  NoteOn  0x0B     *** NOT DOCUMENTED ***
+   2. +  4.53s  NoteOn  0x09     *** NOT DOCUMENTED ***
+   3. +  3.79s  NoteOn  0x0A     *** NOT DOCUMENTED ***
+
+====================================================================
+ PHASE 3 - ANY REMAINING BUTTONS
+====================================================================
+   Press anything in the browse/library area not covered yet -
+   and anything anywhere on the panel we may have missed.
+   One at a time, a few seconds apart.
+
+   starting in 5 seconds...
+     45s
+     44s
+     43s
+     42s
+     41s
+     40s
+     39s
+     38s
+     37s
+     36s
+     35s
+     34s
+     33s
+     32s
+     31s
+     30s
+     29s
+     28s
+     27s
+     26s
+     25s
+     24s
+     23s
+     22s
+     21s
+     20s
+     19s
+     18s
+     17s
+     16s
+     15s
+     14s
+     13s
+     12s
+     11s
+     10s
+      9s
+      8s
+      7s
+      6s
+      5s
+      4s
+      3s
+      2s
+      1s
+    done.
+
+  arrival order:
+   1. +     0s  CC      0x04     -> pitch fader A (coarse)
+   2. +     0s  CC      0x24     -> pitch fader A (fine)
+   3. +  0.29s  NoteOn  0x19     -> PITCH BEND + A
+   4. +  0.12s  NoteOn  0x18     -> PITCH BEND - A
+   5. +  0.34s  NoteOn  0x17     -> HOT CUE 5 A
+   6. +  0.17s  NoteOn  0x11     -> PLAY A
+   7. +  0.17s  NoteOn  0x16     -> HOT CUE 4 A
+   8. +  0.13s  NoteOn  0x10     -> CUE A
+   9. +  0.19s  NoteOn  0x15     -> HOT CUE 3 A
+  10. +  0.17s  NoteOn  0x0F     -> SYNC A
+  11. +  0.21s  NoteOn  0x14     -> HOT CUE 2 A
+  12. +  0.19s  NoteOn  0x13     -> HOT CUE 1 A
+  13. +  0.19s  NoteOn  0x12     -> SHIFT A
+  14. +  0.38s  NoteOn  0x52     -> FX ON A
+  15. +  0.32s  CC      0x57     -> FX slider A (coarse)
+  16. +     0s  CC      0x77     -> FX slider A (fine)
+  17. +  0.62s  CC      0x56     -> FX parameter
+  18. +     1s  NoteOn  0x53     -> FX SELECT A
+  19. +  0.26s  CC      0x5A     -> FX select
+  20. +  0.42s  NoteOn  0x1E     -> TAP A
+  21. +  0.57s  NoteOn  0x1C     -> REVERSE/CENSOR A
+  22. +  0.13s  NoteOn  0x1D     -> REVERSE/CENSOR A (2)
+  23. +   0.5s  CC      0x47     -> motor STOP TIME knob A
+  24. +  0.62s  CC      0x46     -> motor START TIME knob A
+  25. +  0.55s  NoteOn  0x21     -> MOTOR ON/OFF A
+  26. +  0.41s  NoteOn  0x26     -> LOOP SHIFT > A
+  27. +  0.31s  NoteOn  0x22     -> LOOP 1/2 A
+  28. +  0.18s  NoteOn  0x25     -> LOOP SHIFT < A
+  29. +  0.19s  NoteOn  0x23     -> LOOP x2 A
+  30. +  0.34s  NoteOn  0x28     -> LOOP IN A
+  31. +   0.2s  NoteOn  0x2B     -> RELOOP A
+  32. +  0.55s  NoteOn  0x29     -> LOOP OUT A
+  33. +  0.19s  NoteOn  0x2A     -> SELECT A
+  34. +  0.52s  NoteOn  0x24     -> RELOOP/EXIT A
+  35. +  0.24s  NoteOn  0x27     -> LOOP MODE A
+  36. +  2.29s  NoteOn  0x51     *** NOT DOCUMENTED ***
+  37. +  1.26s  NoteOn  0x4E     *** NOT DOCUMENTED ***
+  38. +  1.74s  CC      0x45     -> strip search A
+  39. +   1.5s  CC      0x44     -> browse / track select knob
+  40. +  0.06s  NoteOn  0x08     -> LOAD
+  41. +  1.37s  NoteOn  0x06     -> browse BACK
+  42. +  0.41s  NoteOn  0x07     -> browse FWD
+  43. +  0.58s  NoteOn  0x0B     *** NOT DOCUMENTED ***
+  44. +  0.32s  NoteOn  0x09     *** NOT DOCUMENTED ***
+  45. +  0.24s  NoteOn  0x0A     *** NOT DOCUMENTED ***
+  46. +  0.24s  NoteOn  0x0E     -> LOAD deck B
+  47. +  0.27s  NoteOn  0x0D     -> LOAD
+  48. +  0.41s  NoteOn  0x0C     -> LOAD deck A
+  49. +  0.67s  NoteOn  0x5C     -> DECK SELECT L
+  50. +     0s  CC      0x7D     *** NOT DOCUMENTED ***
+  51. +  0.01s  CC      0x59     -> FX slider B (coarse)
+  52. +     0s  CC      0x79     -> FX slider B (fine)
+  53. +     0s  CC      0x4E     -> motor START TIME knob B
+  54. +     0s  CC      0x4D     -> strip search B
+  55. +     0s  CC      0x4F     -> motor STOP TIME knob B
+  56. +  1.98s  NoteOn  0x54     -> MASTER L
+  57. +   0.4s  NoteOn  0x1B     -> KEY LOCK A
+  58. +  0.35s  NoteOn  0x1A     -> PITCH RANGE A
+
+Done - Claude can read the transcript, no need to copy anything.
+**********************
+Windows PowerShell transcript end
+End time: 20260824214805
+**********************

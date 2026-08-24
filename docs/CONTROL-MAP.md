@@ -166,6 +166,35 @@ velocity. A stationary platter sends nothing at all ✅.
 > constant values. Unexplained; not chased.
 
 > ⚠️ **Input and output CC numbers overlap and do not mean the same thing.**
+> ### ✅ Strip search — releasing sends `0`
+>
+> The address was known (`B0 45` deck A, `B0 4D` deck B, absolute 7-bit). The
+> behaviour was not, and it is the part that decides whether a needle-drop
+> mapping works.
+>
+> Measured over 15 gestures on Windows: **lifting a finger emits value `0`.**
+> The pattern is unmistakable when gestures are split on a 300 ms gap —
+> a touch, then a release burst ending at zero:
+>
+> ```
+> gesture 10   n=4  27 .. 26        <- tap held at ~27
+> gesture 11   n=3  28 .. 0         <- release
+> gesture 12   n=4  117 .. 124      <- tap at ~120
+> gesture 13   n=4  123 .. 0        <- release
+> gesture 14   n=4  78 .. 94
+> gesture 15   n=5  93 .. 0         <- release
+> ```
+>
+> Two gestures were a lone `n=1, value 0` — the release arriving more than
+> 300 ms after the touch ended, so it grouped separately.
+>
+> ⚠️ **`0` is therefore ambiguous**: it is both "finger lifted" and "finger at
+> the very bottom of the strip". A host that treats the strip as a plain
+> absolute position will jump the playhead to the start of the track **every
+> time the finger leaves**, which presents as a broken mapping but is the
+> protocol working as designed. Disambiguate by treating a `0` that follows a
+> non-zero value as a release, not a position.
+
 > Input CC `0x45` is the deck-A strip search; output CC `0x45` is motor RPM
 > select. Input `0x46`/`0x47` are the start/stop-time knobs; output `0x46` is
 > motor direction and `0x47`/`0x48` are the ramp times. Direction disambiguates
