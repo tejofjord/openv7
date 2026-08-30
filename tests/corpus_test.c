@@ -113,6 +113,13 @@ static int grade(const struct corpus *c) {
             } else if ((out[0] & 0xF0) == 0xE0) ts++;
         }
     }
+    /* Flush a trailing run. `since` is only banked when a LATER position
+       arrives, so frames after the final one would otherwise never be counted
+       -- and a regression that ate every message from some point onward would
+       leave its largest run invisible to the gate. No -1 here: in the loop the
+       current frame produced a position and so was not wasted; at EOF every
+       pending frame was. */
+    if (last >= 0 && since > 2) { starved += since; starve_ev++; }
     if (c->gz) pclose(f); else fclose(f);
 
     double mean = dn ? (double)dsum / dn : 0.0;
