@@ -434,6 +434,62 @@ timing. The difference is stark, over the same 12,161 captured frames:
 Reproduce with `tools/win/parse-control-stream.ps1`, whose header documents the
 trap in full.
 
+### ✅ Confirmed on real hardware — 2026-08-30
+
+Everything above was derived from Windows captures replayed offline. It has now
+been verified on the actual device, on Apple Silicon, in the failing
+configuration that motivated the whole investigation.
+
+Method: `openv7 --diag` bridging a real V7, with an **independent second
+process** subscribing to the `Numark V7` CoreMIDI source exactly as a DJ
+application does — so the numbers below are what a consumer receives, not what
+OpenV7 believes it sent. 30 s of hand scratching on deck A.
+
+| | measured |
+|---|---|
+| USB control frames in | 27,453 |
+| MIDI messages delivered | 52,572 |
+| position messages (`B0 00`) | 22,137 |
+| backwards steps (real reversals) | 5.3 % |
+| largest step | 35 counts |
+| **steps ≥ 64 (undecidable)** | **0** |
+
+Two findings that only real hardware could produce:
+
+**The `0xE0` timestamp pairs 1:1 across *both* decks.** The monitor counted
+22,137 deck-A positions against 26,261 timestamps — an apparent 4,124 surplus
+of timestamps, because it only recognised deck A's `B0 00` as a position.
+Deck B's `B0 02` fell into its catch-all "other" bucket, which totalled 4,174.
+
+Run the arithmetic in the direction that is actually measured:
+
+| | |
+|---|---|
+| timestamps | 26,261 |
+| − deck-A positions | 22,137 |
+| = deck-B positions implied by exact pairing | **4,124** |
+| "other" bucket actually counted | 4,174 |
+| residual | **50** |
+
+So 1:1 pairing across both decks holds exactly, provided 4,124 of those 4,174
+"other" messages are deck-B positions and the remaining **50 are ordinary
+button traffic** — plausible over 30 s of handling, and the capture does open
+with a `90 11 7F` note-on. ⚠️ That last step is **inferred, not measured**: the
+monitor lumped `B0 02` together with notes and other CCs, so the 50 were never
+counted separately. Breaking `B0 02` out into its own bucket would settle it.
+
+Both single-deck captures were blind to this entirely.
+
+**The control endpoint is event-driven, not free-running.** With the platter
+untouched and the motor off, `ctrl-bytes` froze completely across six
+consecutive one-second diagnostic ticks — the device sent *nothing*. It resumed
+at ~1000 frames/s the instant the platter was touched. This does not contradict
+the 1 kHz measurement below (that capture was motor-driven, so the platter was
+always in motion), and it explains the 11.4 s hole at t≈17 s in
+`captures/vdj/vdj-inbound-0x83.tsv.gz`: the deck was idle, not dropping frames.
+
+Audibly confirmed hiccup-free in VirtualDJ on two separate Apple Silicon Macs.
+
 ## The platter stream, as a consumer sees it
 
 Measured on hardware, motor-driven at 33.34 RPM (derived from the counter, not
@@ -512,8 +568,15 @@ distribution is:
 
 **Maximum step: 3 counts. Steps ≥ 64: zero.** At 1 kHz the platter advances
 about two counts per frame, so reaching the 64-count limit takes roughly **32
-consecutive lost frames**. The counter carries ~20× headroom over the fastest
-motion actually observed, and the ambiguity never fires on a host that keeps up.
+consecutive lost frames**, and the ambiguity never fires on a host that keeps up.
+
+> ⚠️ **Do not read 3 counts as the deck's ceiling.** This capture was taken
+> with the **motor** driving the platter — smooth, bounded, and slower than a
+> hand. Measured on real hardware (Apple Silicon, 2026-08-30, 30 s of hand
+> scratching, 22,137 position samples) the worst step was **35 counts**. Steps
+> ≥ 64 were still zero, so the conclusion holds — but the margin is **~1.8×,
+> not the ~20× this motor-driven capture implies.** Any future change that
+> costs frames eats that margin far faster than the corpus suggests.
 
 The practical consequence is the reverse of what was written here: wrap
 disambiguation, interpolation and gap-filling are not needed, and building them
