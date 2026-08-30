@@ -3,6 +3,11 @@
 **Status: X1 through X5 are all answered. There is nothing left that needs this
 machine.** Everything below is a result, not a task.
 
+> ✅ **Closed 2026-08-30.** The framing fix shipped in v1.0.2 and is confirmed
+> hiccup-free by ear on two Apple Silicon Macs, with hardware measurements now
+> in [PROTOCOL.md](PROTOCOL.md). The one item still genuinely open is the
+> **motor output** binding (item 4 below).
+
 The Windows box was the working reference: Windows 11 + VirtualDJ + the stock
 Ploytec/Numark driver v2.9.64 drives this V7 with no hiccups, while the same
 application on Apple Silicon through the OpenV7 bridge hiccups in vinyl mode.
@@ -128,15 +133,24 @@ In order of value.
    position and parsing the concatenation. `make corpus` grades the splitter
    against all 12,161 frames in CI, because the hand-written vectors all used
    self-contained frames and passed either way.
-   **Still open:** 5.8% is most of the 6.4% shortfall but not provably all of
-   it. Confirm on hardware — frames received (`g_ctrl_bytes` / 42) against
-   messages emitted.
-3. **X2 — replay the captured stream.** ← **the next real experiment** `captures/vdj/vdj-inbound-0x83.tsv.gz`
-   holds 68,678 inbound frames with arrival timestamps, taken while the working
-   system played and scratched. Replay it into CoreMIDI verbatim and listen:
-   - clean → our transport is exonerated, the encoding is the fault
-   - hiccups → the fault is downstream of the bytes, and the search moves to
-     CoreMIDI delivery or VirtualDJ's macOS build
+   ~~**Still open:** 5.8% is most of the 6.4% shortfall but not provably all of
+   it. Confirm on hardware.~~ ✅ **Confirmed on hardware 2026-08-30.** Real V7
+   on Apple Silicon, 30 s of hand scratching, with a second process subscribed
+   to the CoreMIDI source to measure what a consumer actually receives:
+   **27,453 frames in, 52,572 messages out, 22,137 positions, zero steps ≥ 64.**
+   `make corpus` now also gates on *frames swallowed* — frames that demonstrably
+   arrived and produced no position update — which is 10 with the fix and 4,035
+   without it. That metric cannot be explained away by device idle or capture
+   pauses, unlike a timing gap.
+3. ~~**X2 — replay the captured stream.**~~ ✅ **Done, and then superseded by
+   the real thing.** `openv7 --replay <capture> [--replay-loop]` plays the
+   68,678-frame capture into CoreMIDI with original pacing, and `--legacy-parse`
+   restores the old behaviour for an A/B. Offline the fix recovers 8,101
+   messages, drops the worst step from 64 to 10, and halves the p99.9
+   position-update gap (34.9 ms → 18.1 ms).
+   Then the deck itself became available: **audibly confirmed hiccup-free in
+   VirtualDJ on two separate Apple Silicon Macs** (a tester's, 2026-08-29; and
+   this one, 2026-08-30). The encoding was never the fault — the parser was.
 4. **Make VDJ command the motor.** The definition diff is done and it came back
    **identical** — `sha256 2c9e2dec…` for both `controllers-windows.dat` and the
    macOS `~/Library/Application Support/VirtualDJ/Devices/controllers.dat`.
@@ -144,8 +158,15 @@ In order of value.
    definition difference; it is a **binding** failure. The live candidate is the
    port name — Windows exposes `Numark V7 MIDI`, our CoreMIDI source is
    `Numark V7`.
-   ⚠️ Renaming the published source will break any mapping a user already
-   MIDI-learned against `Numark V7`, so decide rename-vs-option before shipping.
+   ⚠️ **Narrowed 2026-08-30: do not rename.** VirtualDJ on macOS binds to
+   `Numark V7` correctly for **input** — the controller drives the software with
+   the current name, confirmed on hardware. A rename would break existing
+   MIDI-learn mappings to fix a problem input does not have. Whatever blocks the
+   motor command is specific to the **output** direction and has not been
+   isolated; that is the remaining open question here.
+   One operational gotcha worth knowing: VirtualDJ enumerates CoreMIDI sources
+   **at launch only**. The bridge must already be running when VDJ starts, or it
+   sees nothing and the controller appears dead.
 
 ---
 
