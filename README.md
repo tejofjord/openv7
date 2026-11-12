@@ -175,6 +175,7 @@ The V7 exposes two vendor-specific USB interfaces. OpenV7:
 |---|---|
 | [docs/PROTOCOL.md](docs/PROTOCOL.md) | USB identity, endpoints, init handshake, platter reporting, the full motor command set, SysEx device identity |
 | [docs/CONTROL-MAP.md](docs/CONTROL-MAP.md) | Every control in and every LED/motor command out, with per-row confidence |
+| [docs/NS7-CONTROL-MAP.md](docs/NS7-CONTROL-MAP.md) | The NS7: USB identity, every control in (mixer, switches, both decks), every LED, and the motor command set, measured on hardware |
 | [docs/AUDIO-CODEC.md](docs/AUDIO-CODEC.md) | The Ploytec bit-interleaved format, packet framing, and why MIDI lives inside the audio packets |
 | [docs/VENDOR-DRIVER.md](docs/VENDOR-DRIVER.md) | Static analysis of the stock Windows driver — the keepalive and recovery mechanisms |
 | [docs/HARDWARE.md](docs/HARDWARE.md) | The boards inside the deck, the platter's encoder path, and where the clocks come from |

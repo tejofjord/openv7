@@ -15,6 +15,12 @@
 /* --- USB identity --- */
 #define V7_VID              0x15E4   /* Numark */
 #define V7_PID              0x0075   /* V7 */
+#define NS7_PID             0x0071   /* NS7 — same Ploytec chipset. Its config
+                                      * descriptor (read on real hardware) is
+                                      * byte-for-byte the V7's endpoint layout:
+                                      * same EPs, sizes, intervals, alt settings.
+                                      * Inputs, LEDs and motor commands are
+                                      * mapped in docs/NS7-CONTROL-MAP.md. */
 
 /* --- Endpoints (from the captured config descriptor) ---
  * IF0 alt1: iso-OUT audio, bulk-IN control, bulk-OUT control

@@ -1040,8 +1040,17 @@ int main(int argc, char **argv) {
     }
 
     if (libusb_init(&g_ctx) < 0) { fprintf(stderr, "libusb init failed\n"); return 1; }
+    const char *model = "V7";
     g_dev = libusb_open_device_with_vid_pid(g_ctx, V7_VID, V7_PID);
-    if (!g_dev) { fprintf(stderr, "Numark V7 not found (is it plugged in and powered on?)\n"); return 2; }
+    if (!g_dev) {
+        /* NS7: same chipset and endpoint layout as the V7 (see ploytec.h), so the
+           transport is shared. Still published as "Numark V7" over CoreMIDI so
+           the menu-bar app and mapper keep binding while the NS7 is explored. */
+        g_dev = libusb_open_device_with_vid_pid(g_ctx, V7_VID, NS7_PID);
+        if (g_dev) model = "NS7";
+    }
+    if (!g_dev) { fprintf(stderr, "Numark V7/NS7 not found (is it plugged in and powered on?)\n"); return 2; }
+    fprintf(stderr, "OpenV7: found Numark %s.\n", model);
     /* DO NOT call libusb_reset_device() here -- on the bring-up path. (The stall
        recovery below does reset, deliberately, as a last resort.) Re-measured
        2026-08-24 on a wedged deck: a reset followed by a FRESH process does
