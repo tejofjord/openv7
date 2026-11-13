@@ -159,22 +159,9 @@ as on the V7.
 | Platter position | `B0 00` ✅ | `B0 02` 📎 | **Clockwise counts up** ✅. Hand-turning about 167° of deck A gave +1,667 counts net at 3,600 counts/rev |
 | Platter timestamp | `E0` ✅ | **`E2`** 📎 | Paired **1:1** with position: 1,313 of each on deck A in a single turn ✅, and 4,049 of each on deck B in the sweep. Deck B's timestamp is on MIDI channel 3. The bridge matches on the status nibble, so it already forwards both |
 | Pitch fader | `B0 04` + `24` ✅ | `B0 05` + `25` ✅ | 14-bit |
-| Strip search | `B0 45` ✅ | `B0 4D` ✅ | **Left → right increases**, reaching 124 at the right end. See the strip notes below |
+| Strip search | `B0 45` ✅ | `B0 4D` ✅ | **Left → right increases**, reaching 124 at the right end |
 | START TIME knob | `B0 46` ✅ | `B0 4E` 📎 | 7-bit |
 | STOP TIME knob | `B0 47` ✅ | `B0 4F` 📎 | 7-bit |
-
-**Strip search on the NS7 differs from the V7 in two ways that matter to a
-mapping:**
-
-- **It jitters between 0 and 4 continuously at rest**, on both decks, whether
-  touched or not. Over one session deck B sent 469 × `00`, 438 × `03`,
-  103 × `02` and 87 × `04` while nobody touched it.
-- **Lifting a finger falls back into that jitter, not to a clean 0.** On the V7,
-  release sends `0` (see "Strip search — releasing sends `0`" under
-  [CONTROL-MAP.md → Platter and continuous controls](CONTROL-MAP.md#platter-and-continuous-controls-cc-status-0xb0)).
-
-So a mapping should treat **any value ≤ 4 as "not touched"** and ignore it.
-Taking `0` as the release signal would fire constantly.
 
 ## Deck: buttons
 
@@ -388,6 +375,4 @@ item is a refinement, not a gap.
 Measure one control at a time with the bridge in `-v`, using
 [`tools/wait-control.pl`](../tools/wait-control.pl) (its header shows how). For
 a strip or platter, set `NS7_KEEP` (for example `NS7_KEEP="b0 45"`), because
-the watcher otherwise filters those addresses out as background noise. For a
-strip, also set `NS7_FLOOR=8`. The strip's 0–4 rest jitter never pauses, so
-without a floor the watcher never sees the gesture end.
+the watcher otherwise filters those addresses out as background noise.

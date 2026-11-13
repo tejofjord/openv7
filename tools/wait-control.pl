@@ -12,7 +12,7 @@
 #   wait-control.pl LOG STATEFILE [TIMEOUT_S] [QUIET_S]
 #
 # Reads only what the log gained since the byte offset in STATEFILE, ignoring
-# known background traffic (strip-search rest jitter, platters, startup CC).
+# known background traffic (strip search, platters, startup CC).
 # Waits for the first relevant message, then until QUIET_S of silence, so a
 # whole fader sweep counts as one gesture. Prints one line per address:
 #   KEY  n=COUNT  min..max  first->last
@@ -21,10 +21,9 @@
 # Set NS7_KEEP="b0 45,b0 00" to stop ignoring specific noise addresses (needed
 # when the control under test IS a strip or a platter).
 #
-# For a STRIP, also set NS7_FLOOR=8. A resting strip jitters between 0 and 4
-# without pause, so without a floor that jitter counts as activity: the
-# gesture never goes quiet and this never returns (that happened while mapping
-# the NS7). Values below the floor on a NS7_KEEP address are ignored entirely.
+# NS7_FLOOR=N ignores values below N on a NS7_KEEP address entirely. Use it
+# for a strip that sends small values while untouched; otherwise those count as
+# activity and the gesture never goes quiet.
 use strict; use warnings; use Time::HiRes qw(time sleep);
 
 my ($log, $state, $timeout, $quiet) = @ARGV;
@@ -33,7 +32,7 @@ my %noise = map { $_ => 1 } ('b0 45', 'b0 4d', 'b0 00', 'b0 02', 'b0 6e');
 my %keep  = map { $_ => 1 } grep { length } split /\s*,\s*/, ($ENV{NS7_KEEP} // '');
 delete $noise{$_} for keys %keep;
 my $keep_ts = grep { /^b0 0[02]$/ } keys %keep;   # platter under test: keep its timestamps too
-my $floor   = $ENV{NS7_FLOOR} // 0;                # strip rest-jitter cut-off (see above)
+my $floor   = $ENV{NS7_FLOOR} // 0;                # low-value cut-off (see above)
 
 my $off = 0;
 if (open my $s, '<', $state) { $off = <$s> // 0; chomp $off; close $s; }
@@ -55,7 +54,7 @@ while (1) {
         next if $noise{$key};
         next if $st =~ /^e[02]$/ && !$keep_ts;
         my $v = hex(defined $d1 ? $d1 : $d0);
-        next if $keep{$key} && $v < $floor;   # rest jitter: neither a gesture nor activity
+        next if $keep{$key} && $v < $floor;   # below the floor: neither a gesture nor activity
         push @order, $key unless $n{$key}++;
         $min{$key} = $v if !defined $min{$key} || $v < $min{$key};
         $max{$key} = $v if !defined $max{$key} || $v > $max{$key};
