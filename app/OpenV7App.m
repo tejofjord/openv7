@@ -41,7 +41,7 @@ static BOOL usbDevicePresent(int vid, int pid) {
 
 /* Either deck the bridge can drive: it opens a V7 first, then an NS7. */
 static BOOL v7IsPluggedIn(void) {
-    return usbDevicePresent(V7_VID, V7_PID) || usbDevicePresent(V7_VID, NS7_PID);
+    return usbDevicePresent(NUMARK_VID, V7_PID) || usbDevicePresent(NUMARK_VID, NS7_PID);
 }
 
 static NSColor *HEX(int r,int g,int b,double a){ return [NSColor colorWithSRGBRed:r/255.0 green:g/255.0 blue:b/255.0 alpha:a]; }
