@@ -28,6 +28,24 @@ jobs:
       - name: Corpus regression (vendor-driver capture)
         run: make corpus
 
+      # The audio ring + drift-corrected resampler (src/v7ring.c): bit-exact
+      # copy at ratio 1.0, clock drift absorbed, 48k->44.1k, threads racing.
+      - name: Audio tests
+        run: make audiotest
+
+      # iso-OUT paced by the deck's feedback: a simulated fast deck's FIFO must
+      # hold for 10 minutes (and must drain without feedback).
+      - name: Feedback pacing tests
+        run: make feedbacktest
+
+      # The "Numark V7" CoreAudio plug-in: it must build, export its factory,
+      # and answer the HAL's questions correctly when driven in-process.
+      - name: Build the audio driver
+        run: make driver
+
+      - name: Audio driver tests
+        run: make drivertest
+
       - name: Sanity check
         run: ./openv7 --help
 

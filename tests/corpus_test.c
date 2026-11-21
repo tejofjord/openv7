@@ -91,6 +91,7 @@ static int grade(const struct corpus *c) {
 
         for (int i = 0; i < 42; i++) {
             uint8_t out[3];
+            if (in_frame_trailer(42, i)) { s.pad = 0; continue; }   /* exactly as ctrl_in_cb */
             int n = midi_feed(&s, fr[i], out);
             if (n != 3) continue;
             if (out[0] == 0xB0 && out[1] == 0x00) {

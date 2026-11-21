@@ -194,6 +194,42 @@ velocity. A stationary platter sends nothing at all ✅.
 > time the finger leaves**, which presents as a broken mapping but is the
 > protocol working as designed.
 >
+> ✅ **On the Mac (2026-11-20, `build/vdj-A.log`, 346 strip messages against
+> VirtualDJ) a release usually ends at `01`, not `0`:** the value falls to `01`
+> within ~4-20 ms of the finger leaving, often through one or two transient
+> values on the way (`58 57 01`, `4d 07 01`, `49 35 01`), and `00` follows
+> 40-600 ms later or not at all. A landing can start with a low transient too
+> (`01 03 15`). The **deck-switch state dump also reports the strip as `01`.**
+> VirtualDJ seeks to `01` (~0.8 % into the track) on every one of those, which
+> is the "song drops back to before the audio" symptom. `openv7 --strip-filter`
+> normalises all of it to one clean `00`, the Windows shape; replayed against
+> that session it cut seeks into the first 6 % of the track from 24 to 0.
+>
+> **The physical travel is narrower than 0-127:** the left end reads ~`0x1c`
+> (28) and the right end ~`0x7c`-`0x7d` (124-125) on this unit, matching the
+> 26-124 of the Windows gestures. Mapped raw, the far left seeks ~22 % into the
+> track and the far right ~98 %, where a playing track soon runs out and
+> stops. `--strip-range 28,124` stretches that travel to `1`..`124`.
+>
+> ✅ **After the Numark strip calibration** (HOT CUE 1 + 3 at power-on,
+> 2026-11-20) the travel is the full `2`..`127` (`build/vdj-F.log`), and
+> VirtualDJ landed ~15 s *before* the start at the far left and ran off the
+> end at the far right. Its built-in V7 profile does not map `0`..`127` onto
+> the track. Four landings on a 3:01 track (raw `2` → -0:14.7, middle →
+> 1:33, `11` → 0:00.7, `113` → 2:55.4) fit one line: **0 % at ~10.6, 100 %
+> at ~116.4**, i.e. 1/12 and 11/12 of 127, unclamped. `--strip-out 10,115`
+> maps the calibrated travel inside that window.
+>
+> The calibrated strip is also noisier: every lift is preceded by a 20-40 ms
+> roll-off (`7f 79 69 61 33 2e 2c 18 07 00`), lifts bounce (`00 5b 00`,
+> blips of 0-36 ms, while every real touch lasted ≥ 81 ms), and landings
+> settle over ~30 ms (`36 6a 73 78 7b 7f`). Pressing at the far end also dips
+> the reading for 10-20 ms (`78 74 65 57 56 67 72 7d`). The filter (default
+> since 1.1.0) delays strip values 50 ms, discards whatever is still waiting
+> when the finger lifts, and skips a dip that comes straight back.
+> Replayed against that log, the position apps are left at is within 4 counts
+> of where the finger rested in 63 of 66 touches (the previous filter: 28).
+
 > A **heuristic** that works in practice is to treat a `0` following a non-zero
 > value as a release rather than a position. It is not sound, and the failure is
 > easy to state: sliding a finger from mid-strip down to the physical bottom

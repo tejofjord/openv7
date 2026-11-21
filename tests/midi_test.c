@@ -37,6 +37,36 @@ static void expect(const char *what, const uint8_t *in, int nin,
     } else printf("  ok   %s\n", what);
 }
 
+/* Feed timed strip values (ms, value pairs, -1 ends) through the filter with a
+   1 ms main-loop tick; collect what apps would see. Values are raw unless a
+   map is set. */
+static int g_sunk[256], g_nsunk;
+static void sink(const uint8_t *m) { if (g_nsunk < 256) g_sunk[g_nsunk++] = m[2]; }
+static void strip_run(uint8_t cc, const int *in) {
+    memset(g_strip, 0, sizeof g_strip);
+    g_strip_sink = sink; g_nsunk = 0;
+    long t = 0;
+    for (int i = 0; in[i] >= 0; i += 2) {
+        while (t < in[i]) strip_tick_at(t++);
+        uint8_t m[3] = {0xB0, cc, (uint8_t)in[i + 1]}, f[3]; const char *why;
+        if (strip_process_at(m, 3, f, &why, t)) sink(f);
+    }
+    for (long end = t + 500; t < end; ) strip_tick_at(t++);
+}
+static void strip_case(const char *what, uint8_t cc, const int *in, const int *want) {
+    strip_run(cc, in);
+    int nw = 0; while (want[nw] >= 0) nw++;
+    int ok = g_nsunk == nw;
+    for (int i = 0; ok && i < nw; i++) ok = g_sunk[i] == want[i];
+    if (!ok) {
+        fails++;
+        printf("  FAIL %-44s got:", what); for (int i = 0; i < g_nsunk; i++) printf(" %02x", g_sunk[i]);
+        printf("   want:"); for (int i = 0; i < nw; i++) printf(" %02x", want[i]); printf("\n");
+    } else printf("  ok   %s\n", what);
+}
+/* a steady hold: value v every 4 ms from t0 for ms */
+static int *hold(int *p, int t0, int ms, int v) { for (int t = t0; t < t0 + ms; t += 4) { *p++ = t; *p++ = v; } return p; }
+
 int main(void) {
     printf("midi_feed:\n");
     { uint8_t i[]={0x90,0x11,0x7f}, w[]={0x90,0x11,0x7f};
@@ -70,9 +100,112 @@ int main(void) {
     /* Realtime may be interleaved INSIDE SysEx and must not end it. */
     { uint8_t i[]={0xF0,0x7E,0xF8,0x00,0xF7,0x90,0x11,0x7f}, w[]={0x90,0x11,0x7f};
       expect("realtime inside SysEx is ignored", i,8, w,3); }
+    /* The SysEx that was dropped above is not lost: the parser hands the whole
+       clean message to its caller (s.sx / s.sxready), which forwards inbound
+       ones to apps and outbound device inquiries to the deck. */
+    { struct midi_split s = {0}; uint8_t o[3];
+      uint8_t rep[] = {0xF0,0x00,0x01,0x3F,0x7F,0x75,0x07,0x00,0x02,0x04,0x01,0x00,0x02,0x08,
+                       0x30,0x4E,0x31,0x31,0x30,0x30,0x31,0x31,0x38,0x38,0x31,0x30,0x33,0x34,0x32,0x38,0xF7};
+      int ready = 0;
+      for (unsigned k = 0; k < sizeof rep; k++) { midi_feed(&s, rep[k], o); if (s.sxready) ready = 1; }
+      int ok = ready && s.sxlen == (int)sizeof rep && !memcmp(s.sx, rep, sizeof rep);
+      if (!ok) fails++;
+      printf("  %s %s\n", ok ? "ok  " : "FAIL", "SysEx identity reply collected whole (31 bytes)"); }
+    { struct midi_split s = {0}; uint8_t o[3]; int ready = 0;
+      uint8_t q[] = {0xF0,0x7E,0x00,0xFD,0xFD,0xFD,0xFD,0xFD,0xFD,0xFD,0xFD,0xFD,0x00,0x06,0x01,0xF7};
+      for (unsigned k = 0; k < sizeof q; k++) { midi_feed(&s, q[k], o); if (s.sxready) ready = 1; }
+      uint8_t want[] = {0xF0,0x7E,0x00,0x06,0x01,0xF7};
+      int ok = ready && s.sxlen == 6 && !memcmp(s.sx, want, 6) && is_device_inquiry(s.sx, s.sxlen);
+      if (!ok) fails++;
+      printf("  %s %s\n", ok ? "ok  " : "FAIL", "SysEx spanning a frame boundary (filler + terminator) reassembles"); }
+    { struct midi_split s = {0}; uint8_t o[3]; int ready = 0;
+      uint8_t a[] = {0xF0,0x7E,0x00,0x90,0x11,0x7f};
+      for (unsigned k = 0; k < sizeof a; k++) { midi_feed(&s, a[k], o); if (s.sxready) ready = 1; }
+      if (ready) fails++;
+      printf("  %s %s\n", !ready ? "ok  " : "FAIL", "an aborted SysEx is never handed on"); }
+    { struct midi_split s = {0}; uint8_t o[3]; int ready = 0;
+      uint8_t big[80]; big[0] = 0xF0; for (int k = 1; k < 79; k++) big[k] = 0x11; big[79] = 0xF7;
+      for (unsigned k = 0; k < sizeof big; k++) { midi_feed(&s, big[k], o); if (s.sxready) ready = 1; }
+      if (ready) fails++;
+      printf("  %s %s\n", !ready ? "ok  " : "FAIL", "an over-long SysEx is dropped, not truncated"); }
+    { uint8_t vendor[] = {0xF0,0x00,0x01,0x3F,0x7F,0x01,0xF7}, inq[] = {0xF0,0x7E,0x7F,0x06,0x01,0xF7};
+      int ok = is_device_inquiry(inq, 6) && !is_device_inquiry(vendor, 7);
+      if (!ok) fails++;
+      printf("  %s %s\n", ok ? "ok  " : "FAIL", "only the device inquiry may go to the deck"); }
     /* Running status must NOT carry across a system-common message. */
     { uint8_t i[]={0xF3,0x04,0x05}, w[]={0xF3,0x04};
       expect("no running status after sys-common", i,3, w,2); }
+
+    puts("  -- --strip-filter (sequences verbatim from build/vdj-A.log / vdj-F.log) --");
+    /* the defaults (VirtualDJ map on) are checked below; the filter cases read raw */
+    { int ok = g_strip_filter == 1 && g_strip_map == 1 && strip_scale(2) == 10 && strip_scale(127) == 115;
+      if (!ok) fails++;
+      printf("  %s %s\n", ok ? "ok  " : "FAIL", "default: filter on, VirtualDJ window 10..115"); }
+    g_strip_filter = 1; g_strip_map = 0; g_strip_olo = g_strip_ohi = 0;
+    { int s[400], *p = hold(s, 0, 200, 0x7f);       /* vdj-F 514.725: roll-off off the right end */
+      int ro[] = {0x79,0x69,0x61,0x33,0x2e,0x2c,0x18,0x07,0x00};
+      for (int i = 0; i < 9; i++) { *p++ = 200 + 4 * i; *p++ = ro[i]; } *p = -1;
+      strip_case("release roll-off 7f 79 69 61 .. 00 -> stays 7f", 0x45, s, (int[]){0x7f,0x00,-1}); }
+    { int s[400], *p = hold(s, 0, 200, 0x58); *p++ = 200; *p++ = 0x57; *p++ = 204; *p++ = 0x01; *p = -1;
+      strip_case("release: 58 57 01 -> lifted",              0x45, s, (int[]){0x58,0x00,-1}); }
+    { int s[400], *p = hold(s, 0, 200, 0x4d); *p++ = 200; *p++ = 0x07; *p++ = 204; *p++ = 0x01; *p++ = 500; *p++ = 0; *p = -1;
+      strip_case("release transient: 4d 07 01, later 00",   0x4D, s, (int[]){0x4d,0x00,-1}); }
+    strip_case("lift blips 00 5b 00 / 60 00 5f 02 00",      0x45,
+               (int[]){0,0x5b, 4,0x00, 8,0x60, 12,0x00, 16,0x5f, 20,0x02, 24,0x00, -1}, (int[]){-1});
+    strip_case("deck-flip dump 01 while lifted",            0x4D, (int[]){0,0x01,-1}, (int[]){-1});
+    strip_case("a 36 ms touch is noise",                    0x45, (int[]){0,0x40, 12,0x40, 24,0x41, 36,0x00,-1}, (int[]){-1});
+    { int s[400], *p = s; int land[] = {0x36,0x6a,0x73,0x78,0x79,0x7b,0x7d,0x7f};
+      for (int i = 0; i < 8; i++) { *p++ = 4 * i; *p++ = land[i]; }
+      p = hold(p, 32, 200, 0x7f); *p++ = 232; *p++ = 0; *p = -1;   /* vdj-F 430.684 */
+      strip_case("landing 36 6a 73 .. 7f seeks once, settled", 0x45, s, (int[]){0x7d,0x7f,0x00,-1}); }
+    strip_case("slow slide to the bottom",                  0x45,
+               (int[]){0,0x06, 100,0x05, 200,0x04, 300,0x03, 400,0x02, 500,0x01,-1}, (int[]){0x06,0x05,0x04,0x03,0x02,0x00,-1});
+    { int s[400], *p = hold(s, 0, 100, 0x50); *p++ = 100; *p++ = 0x10; p = hold(p, 104, 100, 0x50); *p++ = 204; *p++ = 0; *p = -1;
+      strip_case("a one-sample spike while held is ignored", 0x45, s, (int[]){0x50,0x00,-1}); }
+    { int s[400], *p = hold(s, 0, 100, 0x78);       /* vdj-G 77.404: a pressure dip at the far end */
+      int dip[] = {0x74,0x65,0x57,0x56,0x67,0x72,0x7d};
+      for (int i = 0; i < 7; i++) { *p++ = 100 + 4 * i; *p++ = dip[i]; }
+      p = hold(p, 128, 100, 0x7d); *p++ = 228; *p++ = 0; *p = -1;
+      strip_run(0x45, s);
+      int ok = g_nsunk >= 2 && g_sunk[g_nsunk - 1] == 0;
+      for (int i = 0; i < g_nsunk - 1; i++) ok &= g_sunk[i] >= 0x72;
+      if (!ok) { fails++; printf("  got:"); for (int i = 0; i < g_nsunk; i++) printf(" %02x", g_sunk[i]); printf("\n"); }
+      printf("  %s %s\n", ok ? "ok  " : "FAIL", "a dip at the far end that comes straight back is skipped"); }
+    { int s[400], *p = s; for (int i = 0; i < 40; i++) { *p++ = 4 * i; *p++ = 0x20 + i; } *p++ = 300; *p++ = 0; *p = -1;
+      strip_run(0x45, s);
+      int ok = g_nsunk >= 3 && g_sunk[g_nsunk - 2] >= 0x20 + 39 - 12 && g_sunk[g_nsunk - 1] == 0;
+      if (!ok) fails++;
+      printf("  %s %s\n", ok ? "ok  " : "FAIL", "a drag follows the finger and ends where it stopped"); }
+    { /* --strip-range: the physical ends map to the start and to short of the end */
+      g_strip_lo = 28; g_strip_hi = 124;
+      int ok = strip_scale(0x1c) == 1 && strip_scale(0x1b) == 1 && strip_scale(0x7c) == STRIP_OUT_MAX &&
+               strip_scale(0x7f) == STRIP_OUT_MAX && strip_scale(76) == 62 && strip_scale(0) == 0 && strip_scale(1) == 1;
+      int s[400], *p = hold(s, 0, 100, 0x7d); *p = -1; strip_run(0x45, s);
+      ok &= g_nsunk == 1 && g_sunk[0] == STRIP_OUT_MAX;
+      g_strip_lo = g_strip_hi = 0;
+      ok &= strip_scale(0x7d) == 0x7d;
+      if (!ok) fails++;
+      printf("  %s %s\n", ok ? "ok  " : "FAIL", "--strip-range maps 28..124 onto 1..124, off means raw"); }
+    { /* --strip-out: a calibrated full-travel strip squeezed into VirtualDJ's window */
+      g_strip_map = 1; g_strip_olo = 10; g_strip_ohi = 115;
+      int ok = strip_scale(2) == 10 && strip_scale(0x7f) == 115 && strip_scale(0) == 0 && strip_scale(1) == 1 &&
+               strip_scale(64) == 10 + (64 - 2) * 105 / 125;
+      int s[400], *p = hold(s, 0, 100, 0x7f); *p = -1; strip_run(0x4D, s);
+      ok &= g_nsunk == 1 && g_sunk[0] == 115;
+      g_strip_lo = 10; g_strip_hi = 120;                 /* both ends set */
+      ok &= strip_scale(10) == 10 && strip_scale(5) == 10 && strip_scale(120) == 115 && strip_scale(65) == 10 + 55 * 105 / 110;
+      g_strip_map = 0; g_strip_lo = g_strip_hi = g_strip_olo = g_strip_ohi = 0;
+      ok &= strip_scale(0x7f) == 0x7f;
+      if (!ok) fails++;
+      printf("  %s %s\n", ok ? "ok  " : "FAIL", "--strip-out maps 2..127 onto 10..115; 00/01 stay lifted"); }
+    { uint8_t f[3]; const char *why; uint8_t led[]={0xB0,0x09,0x01}, pos[]={0xB0,0x00,0x01};
+      int ok = strip_process(led, 3, f, &why) == 3 && strip_process(pos, 3, f, &why) == 3 && f[2] == 0x01;
+      g_strip_filter = 0;
+      uint8_t one[]={0xB0,0x45,0x01};
+      ok &= strip_process(one, 3, f, &why) == 3 && f[2] == 0x01;
+      if (!ok) fails++;
+      printf("  %s %s\n", ok ? "ok  " : "FAIL", "other CCs untouched; off means off"); }
+    g_strip_sink = NULL;
 
     puts("  -- real 42-byte inbound frames (docs/PROTOCOL.md) --");
     /* The frame the platter actually puts on the wire, twice in a row:
@@ -95,6 +228,24 @@ int main(void) {
       i[k++]=0x00;
       expect("two platter frames -> 4 messages", i,k, w,12); }
 
+    puts("  -- the 42nd byte carries AUDIO while audio plays (raw-K, 2026-11-21) --");
+    { /* three real frames from raw-K: deck A position + timestamp, trailer = audio byte */
+      static const char *hex[] = {
+        "b00011e04711fdfdfdfdfdfdfdfdfdfdfdfdfdfdfdfdfdfdfdfdfdfdfdfdfdfdfdfdfdfdfdfdfdfdfdf0",
+        "b00010e03b3efdfdfdfdfdfdfdfdfdfdfdfdfdfdfdfdfdfdfdfdfdfdfdfdfdfdfdfdfdfdfdfdfdfdfdfe",
+        "b0000fe0333cfdfdfdfdfdfdfdfdfdfdfdfdfdfdfdfdfdfdfdfdfdfdfdfdfdfdfdfdfdfdfdfdfdfdfd0e" };
+      uint8_t buf[126]; int len = 0;
+      for (int f = 0; f < 3; f++) for (int i = 0; i < 42; i++) { unsigned v; sscanf(hex[f] + 2*i, "%2x", &v); buf[len++] = (uint8_t)v; }
+      struct midi_split s = {0}; int good = 0, other = 0;
+      for (int i = 0; i < len; i++) {
+          if (in_frame_trailer(len, i)) { s.pad = 0; continue; }
+          uint8_t o[3]; int n = midi_feed(&s, buf[i], o);
+          if (n <= 0) continue;
+          if ((o[0] == 0xB0 && o[1] == 0x00) || o[0] == 0xE0) good++; else other++;
+      }
+      int ok = good == 6 && other == 0;
+      if (!ok) fails++;
+      printf("  %s %s (good %d, other %d)\n", ok ? "ok  " : "FAIL", "audio in the frame trailer is dropped by position", good, other); }
     puts("  -- frame terminator must not fabricate messages --");
     /* THE JOG-JITTER BUG. A frame is <MIDI> <0xFD padding> <0x00 terminator>.
        midi_feed skipped only 0xFD, so the terminator reached the data-byte path

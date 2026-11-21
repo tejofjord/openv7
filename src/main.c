@@ -13,8 +13,9 @@
  * The isochronous OUT stream (silence) runs continuously as the audio clock;
  * the Ploytec chip only reports its controls while that clock is running.
  *
- * Audio (the V7's 4-out soundcard) is not yet exposed — use any CoreAudio
- * output in your DJ app for v1. See docs/ROADMAP.md.
+ * Audio (the V7's 4-out soundcard): with --audio the iso stream carries real
+ * PCM from a CoreAudio device (the "Numark V7" loopback in driver/), and with
+ * --tone a built-in test tone. Without either it stays silence. See src/audio.h.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -27,10 +28,14 @@
 #include <pthread/qos.h>
 #include <sys/resource.h>
 #include <mach/mach_time.h>
+#include <mach/mach.h>
+#include <mach/thread_policy.h>
 #include <libusb.h>
 #include <CoreMIDI/CoreMIDI.h>
 #include <CoreFoundation/CoreFoundation.h>
 #include "ploytec.h"
+#include "audio.h"
+#include "v7feedback.h"
 
 /* Defined in nonap.m — holds a LatencyCritical activity assertion so the menu-bar
    app's QoS clamp doesn't throttle the isochronous stream. */
@@ -53,6 +58,7 @@ static MIDIEndpointRef      g_dest;     /* apps -> device */
 static volatile sig_atomic_t g_quit = 0;
 static int g_stall_exit = 0;   /* exit non-zero so the supervisor relaunches */
 static int g_verbose = 0;
+static FILE *g_raw_in = NULL;   /* --raw-in FILE: every control-IN transfer, hex, for corruption hunts */
 static int g_learn   = 0;
 static int g_diag    = 0;   /* --diag: print iso streaming rates once a second */
 /* Control-stream keepalives: the 25 ms 0xFD frame on bulk 0x04 and the 2 s EP0
@@ -91,6 +97,21 @@ static int g_keepalive = 1;
    `nohup`/disown and must keep running. */
 static int   g_supervised = 0;
 static pid_t g_parent_pid = 0;
+
+/* --audio / --tone (see src/audio.h) */
+static int         g_audio_tone = 0;
+static int         g_audio_on   = 0;
+static const char *g_audio_dev  = NULL;            /* NULL = the Numark V7 loopback */
+static int         g_audio_ms   = AUDIO_DEFAULT_LATENCY_MS;
+static int         g_audio_map[4];
+static int         g_audio_have_map = 0;
+static int         g_iso_depth_req = 0;            /* --iso-depth, 0 = automatic */
+static int         g_audio_buf  = AUDIO_DEFAULT_BUFFER;   /* --audio-buffer, frames */
+static int         g_rt = 1;                       /* --no-rt: keep the event thread at normal priority */
+/* --midi-name: what the CoreMIDI source/destination are called. On Windows the
+   vendor driver's port is "Numark V7 MIDI" (captures/vdj/README.md); whether
+   VirtualDJ's built-in V7 profile treats the two names differently is open. */
+static const char *g_midi_name = "Numark V7";
 
 /* ---- learn mode: catalog each distinct control as it's touched ---- */
 struct cat_entry { int key; uint8_t status, d0, vmin, vmax; long count; };
@@ -162,33 +183,54 @@ static void learn_dump(void) {
 #ifndef ISO_NXFER
 #define ISO_NXFER  16
 #endif
+/* ...but the iso-OUT depth IS the output latency once real audio rides in it:
+   whatever is rendered into a URB at submit time plays when the host
+   controller reaches it, depth x 5 ms later. With audio on it defaults to 8
+   (40 ms -- still deeper in TIME than the 32 ms that was proven stable), and
+   --iso-depth N overrides it for tuning. The arrays stay sized ISO_NXFER. */
+#define ISO_NXFER_AUDIO  8
+static int g_iso_out_nxfer = ISO_NXFER;
+/* Packets (microframes) per iso-OUT URB. 40 = 5 ms, as the vendor driver does.
+   --iso-urb 8 makes each URB 1 ms, so the queue can be a few ms deep in
+   total: latency = depth x packets / 8 ms. The "4 transfers crashed" result
+   above dates from the 2.36x overfeed, before the pacing was fixed and long
+   before it followed the deck's feedback, so shallow queues are re-measured
+   with tools/latency-sweep.sh rather than ruled out. */
+static int g_iso_out_npkt = ISO_NPKT_OUT;
 
 /* ---- iso-OUT pacing ------------------------------------------------------
-   Hold a true 44.1 kHz by carrying the fractional remainder rather than
-   alternating 6/5 blindly (see the NOTE in ploytec.h: strict alternation is
-   44,000 Hz, 0.23 % slow). Per packet: emit 5 frames, add 44100 % 8000 = 4100
-   to the accumulator, and promote to 6 frames whenever it passes 8000. Over any
-   80 packets this sums to exactly 441 frames = 44,100 Hz by construction.
+   Each packet carries what the DECK played in one earlier microframe, as
+   reported on its feedback endpoint (iso IN 0x81) -- see src/v7feedback.h.
 
-   The accumulator is deliberately GLOBAL across all in-flight transfers: it is
-   the aggregate rate on the wire that has to be 44.1 kHz, not the rate of any
-   one URB. Seeded so the first packet is a 72 like the capture's. */
-#define ISO_ACC_STEP  (V7_SAMPLE_RATE % V7_ISO_PKTS_PER_SEC)   /* 4100 */
-static unsigned g_iso_acc = ISO_ACC_STEP;
+   This used to be a fixed 44,100 frames per USB-second (a 4100/8000 fractional
+   accumulator, which is still the fallback before feedback arrives and with
+   --no-feedback). That rate was exactly right and still wrong: the deck plays
+   from its own crystal, which runs ~195 ppm fast against the host, so a fixed
+   44.1 kHz starved it by ~8 frames a second. With silence nobody could hear
+   its FIFO run dry; with --tone it was a 2-second screech every ~20 s. It is
+   also a strong suspect for the control stream's old "dies at ~24 s".
 
-/* Set this transfer's per-packet lengths from the accumulator and resize it to
-   match. The payload stays all-zero (silence), so only the LENGTHS move. */
+   The pacing state is GLOBAL across all in-flight transfers: it is the
+   aggregate rate on the wire that has to match the deck, not any one URB's. */
+static v7fb g_fb;
+static int  g_use_feedback = 1;   /* --no-feedback: the old fixed rate, for A/B */
+
+/* Set this transfer's per-packet lengths from the feedback and resize it to
+   match. Without audio the payload stays all-zero (silence) and only the
+   LENGTHS move; with audio, the exact number of frames these packets carry is
+   rendered into the buffer right here, so the PCM can never drift from the
+   44.1 kHz the lengths encode. libusb packs iso packets contiguously, so the
+   frames are contiguous too. */
 static void iso_pace(struct libusb_transfer *t) {
     int total = 0;
     for (int i = 0; i < t->num_iso_packets; i++) {
-        int frames = V7_ISO_FRAMES_MIN;
-        g_iso_acc += ISO_ACC_STEP;
-        if (g_iso_acc >= V7_ISO_PKTS_PER_SEC) { frames = V7_ISO_FRAMES_MAX; g_iso_acc -= V7_ISO_PKTS_PER_SEC; }
+        int frames = v7fb_next(&g_fb, g_use_feedback);  /* 5 or 6, never more than the buffer holds */
         int len = frames * V7_ISO_FRAME_BYTES;          /* 60 or 72 */
         t->iso_packet_desc[i].length = len;
         total += len;
     }
     t->length = total;                                   /* libusb packs packets contiguously */
+    if (audio_active()) audio_render(t->buffer, total / V7_ISO_FRAME_BYTES);
 }
 
 /* ---- outgoing (app -> device) frame queue ---- */
@@ -209,7 +251,12 @@ static void outq_push(const unsigned char *msg, int len) {
 }
 
 /* ---- small MIDI message splitter (handles running status) ---- */
-struct midi_split { uint8_t status, data[2]; int ndata, need, insysex; int pad; };
+struct midi_split {
+    uint8_t status, data[2]; int ndata, need, insysex; int pad;
+    /* SysEx is collected here rather than through out[]: when an F7 completes
+       one cleanly, sxready is set and the caller decides what to do with it. */
+    uint8_t sx[64]; int sxlen, sxover, sxready;
+};
 
 /* How many consecutive 0xFD bytes mark the END of a 42-byte frame rather than
    incidental filler. Real frames carry 35-38 of them; a lone 0xFD between two
@@ -240,10 +287,27 @@ static int midi_msg_len(uint8_t status) {
 /* feed one byte; when a full message completes, copy it to out[<=3] and return
  * its length, else return 0. 0xFD/idle and realtime are skipped.
  *
- * SysEx is DROPPED rather than forwarded: this bridge's outgoing framing is one
- * message per 42-byte 0xFD-padded frame, which has nowhere to put a message of
- * arbitrary length. Dropping it is a deliberate limitation; mangling it into
- * fake channel messages, which is what happened before, is a bug. */
+ * SysEx never comes out through out[] -- mangling it into fake channel
+ * messages, which is what happened once, is a bug. A complete, clean SysEx
+ * (F0 ... F7, at most 64 bytes) is left in s->sx with s->sxready set, and the
+ * CALLER decides: inbound ones are forwarded to apps, outbound ones only if
+ * they are the device inquiry (see sysex_out). Anything longer, or aborted by
+ * a status byte, is dropped whole. */
+/* The 42nd byte of every inbound frame is NOT MIDI and NOT always 0x00.
+   With silence on the iso-OUT stream it reads 0x00, which is why it was taken
+   for a terminator and swallowed only when zero. With audio playing it carries
+   a byte of the AUDIO -- the high byte of an output sample (raw-K, 2026-11-21:
+   a -18 dBFS test tone put 0x00..0x0F and 0xF0..0xFF there, in a sine's
+   distribution, in 74,408 of 74,408 frames). Parsed as MIDI, those bytes became
+   F1..F6 / Dx / Ex "messages" and, as orphan data bytes under running status,
+   real-looking ones -- deck B pitch (b0 05), strip (b0 4d), buttons -- about 90
+   a second on whichever platter was turning: "deck B jerks once VirtualDJ
+   plays through the V7". Every transfer seen is whole 42-byte frames, so the
+   byte is dropped by POSITION, never by value. */
+#define V7_IN_FRAME_LEN 42
+static int in_frame_trailer(int len, int i) {
+    return len % V7_IN_FRAME_LEN == 0 && i % V7_IN_FRAME_LEN == V7_IN_FRAME_LEN - 1;
+}
 static int midi_feed(struct midi_split *s, uint8_t x, uint8_t out[3]) {
     if (x == V7_MIDI_IDLE) { if (s->pad < FRAME_PAD_MIN) s->pad++; return 0; }
     /* End of a frame. The byte after a long 0xFD run is the frame TERMINATOR
@@ -273,15 +337,29 @@ static int midi_feed(struct midi_split *s, uint8_t x, uint8_t out[3]) {
     s->pad = 0;
     if (x >= 0xF8) return 0;                 /* system realtime — ignore, running status survives */
     if (x & 0x80) {
-        if (x == 0xF0) { s->insysex = 1; s->status = 0; return 0; }
-        if (x == 0xF7) { s->insysex = 0; s->status = 0; return 0; }
-        s->insysex = 0;
+        if (x == 0xF0) {
+            s->insysex = 1; s->status = 0;
+            s->sxlen = 0; s->sxover = 0; s->sxready = 0; s->sx[s->sxlen++] = x;
+            return 0;
+        }
+        if (x == 0xF7) {
+            if (s->insysex && !s->sxover && s->sxlen < (int)sizeof s->sx) {
+                s->sx[s->sxlen++] = x;
+                s->sxready = 1;
+            }
+            s->insysex = 0; s->status = 0;
+            return 0;
+        }
+        s->insysex = 0;                      /* any other status byte aborts a SysEx */
         s->need = midi_msg_len(x);
         if (s->need == 1) { s->status = 0; out[0] = x; out[1] = out[2] = 0; return 1; }
         s->status = x; s->ndata = 0;
         return 0;
     }
-    if (s->insysex) return 0;                /* SysEx payload — see above */
+    if (s->insysex) {                        /* SysEx payload -- see above */
+        if (s->sxlen < (int)sizeof s->sx - 1) s->sx[s->sxlen++] = x; else s->sxover = 1;
+        return 0;
+    }
     if (!s->status) return 0;
     s->data[s->ndata++] = x;
     if (s->ndata >= s->need - 1) {
@@ -307,6 +385,46 @@ static void midi_to_apps(const uint8_t *msg, int len) {
     if (p) MIDIReceived(g_source, pl);
 }
 
+/* ---- SysEx ------------------------------------------------------------------
+   The bridge used to drop SysEx both ways. That hid one exchange that matters:
+   the deck answers the Universal Device Inquiry (F0 7E <dev> 06 01 F7) with
+   its model and serial (docs/PROTOCOL.md), and a DJ app that asks "which deck
+   is this?" and never hears back may treat it as a lesser device. VirtualDJ
+   on macOS has never sent the V7 a motor command, where on Windows it does;
+   an unanswered identity check would explain that.
+
+   Inbound SysEx is the deck talking, so it is passed through as is.
+   Outbound, ONLY the device inquiry is forwarded: the V7's vendor SysEx space
+   reaches MCU flash and a firmware updater (docs/PROTOCOL.md: do not fuzz it),
+   and any app may send SysEx to every port it sees. Everything else is logged
+   and dropped. Both directions are always logged -- they are rare, and they
+   are exactly what is needed to see what an app asks the deck for. */
+static void sysex_log(const char *dir, const uint8_t *m, int n, const char *note) {
+    fprintf(stderr, "OpenV7: SysEx %s ", dir);
+    for (int k = 0; k < n; k++) fprintf(stderr, "%02x ", m[k]);
+    fprintf(stderr, "%s\n", note);
+}
+static void sysex_to_apps(const uint8_t *m, int n) {
+    Byte buf[160];
+    MIDIPacketList *pl = (MIDIPacketList *)buf;
+    MIDIPacket *p = MIDIPacketListInit(pl);
+    p = MIDIPacketListAdd(pl, sizeof(buf), p, 0, (ByteCount)n, m);
+    if (p) MIDIReceived(g_source, pl);
+    sysex_log("in ", m, n, "(from the deck, forwarded to apps)");
+}
+static int is_device_inquiry(const uint8_t *m, int n) {
+    return n == 6 && m[0] == 0xF0 && m[1] == 0x7E && m[3] == 0x06 && m[4] == 0x01 && m[5] == 0xF7;
+}
+static void outq_push(const unsigned char *msg, int len);
+static void sysex_out(const uint8_t *m, int n) {
+    if (is_device_inquiry(m, n)) {
+        outq_push(m, n);
+        sysex_log("out", m, n, "(device inquiry, forwarded to the deck)");
+    } else {
+        sysex_log("out", m, n, "(DROPPED: only the device inquiry is forwarded)");
+    }
+}
+
 /* ---- --replay: play a recorded capture into CoreMIDI, with no device ------
 
    The point is to hold the BYTE STREAM constant while everything around it
@@ -325,6 +443,7 @@ static void midi_to_apps(const uint8_t *msg, int len) {
    period at 1 kHz, so it would smear the very cadence being reproduced. */
 static int  g_diag_jog;                              /* defined below */
 static int  forward_to_apps(const uint8_t *msg);      /* defined below */
+static void verbose_line(const char *dir, const uint8_t *m, int n, const char *note);   /* defined below */
 static void jog_stat(const uint8_t *m, int n);       /* defined below */
 
 static uint64_t g_mach_num = 1, g_mach_den = 1;
@@ -387,17 +506,14 @@ static int replay_run(const char *path) {
             if (due > mach_absolute_time()) mach_wait_until(due);
             uint8_t out[3];
             for (int j = 0; j < fr[i].n; j++) {
+                if (in_frame_trailer(fr[i].n, j)) { ms.pad = 0; continue; }
                 int n = midi_feed(&ms, fr[i].b[j], out);
                 if (n <= 0) continue;
                 msgs++;
                 if (!forward_to_apps(out)) continue;
                 midi_to_apps(out, n);
                 if (g_diag_jog) jog_stat(out, n);
-                if (g_verbose) {
-                    fprintf(stderr, "  in  ");
-                    for (int k = 0; k < n; k++) fprintf(stderr, "%02x ", out[k]);
-                    fprintf(stderr, "\n");
-                }
+                if (g_verbose) verbose_line("in ", out, n, NULL);
             }
         }
         pass++;
@@ -435,17 +551,14 @@ static void dest_read(const MIDIPacketList *pl, void *refCon, void *srcRefCon) {
         struct midi_split s = {0}; uint8_t out[3];
         for (unsigned j = 0; j < p->length; j++) {
             int n = midi_feed(&s, p->data[j], out);
+            if (s.sxready) { s.sxready = 0; sysex_out(s.sx, s.sxlen); }
             if (n > 0) {
                 outq_push(out, n);
                 /* App -> device was completely unlogged, so "the DJ app pressed
                    play and the platter did not spin" had no evidence either way:
                    nothing showed whether the app had sent a motor command at
                    all. Inbound has had -v since the beginning; this is its twin. */
-                if (g_verbose) {
-                    fprintf(stderr, "  out ");
-                    for (int k = 0; k < n; k++) fprintf(stderr, "%02x ", out[k]);
-                    fprintf(stderr, "%s\n", ctrl_label(out[0], out[1]));
-                }
+                if (g_verbose) verbose_line("out", out, n, ctrl_label(out[0], out[1]));
             }
         }
         p = MIDIPacketNext(p);
@@ -720,6 +833,27 @@ static void LIBUSB_CALL isoin_cb(struct libusb_transfer *t) {
     g_iso_in_live[idx] = 0;
     if (t->status == LIBUSB_TRANSFER_NO_DEVICE) { usb_lost(LIBUSB_ERROR_NO_DEVICE, "iso-in"); return; }
     g_isoin_cmpl++;
+    /* This is the deck's FEEDBACK: one 3-byte packet per ms, byte 0 = frames it
+       played in that ms. It paces iso-OUT (iso_pace -> v7fb_next). A transfer
+       that did not complete is skipped whole; the pacing re-latches if that
+       ever costs it its place (src/v7feedback.h). */
+    if (t->status == LIBUSB_TRANSFER_COMPLETED)
+        for (int i = 0; i < t->num_iso_packets; i++)
+            v7fb_packet(&g_fb, libusb_get_iso_packet_buffer_simple(t, (unsigned)i),
+                        (int)t->iso_packet_desc[i].actual_length,
+                        t->iso_packet_desc[i].status == LIBUSB_TRANSFER_COMPLETED);
+    /* --diag: show the raw feedback once, ~1 s in, so a deck that speaks a
+       different format is diagnosable from one log line. */
+    if (g_diag && g_isoin_cmpl == 62 && t->status == LIBUSB_TRANSFER_COMPLETED) {
+        fprintf(stderr, "  [diag] feedback 0x81, first packets (len:bytes):");
+        for (int i = 0; i < t->num_iso_packets && i < 6; i++) {
+            const unsigned char *b = libusb_get_iso_packet_buffer_simple(t, (unsigned)i);
+            unsigned n = t->iso_packet_desc[i].actual_length;
+            fprintf(stderr, "  %u:", n);
+            for (unsigned k = 0; k < n && k < 4; k++) fprintf(stderr, "%02x", b[k]);
+        }
+        fprintf(stderr, "\n");
+    }
     arm_iso(t, &g_iso_in_live[idx], 0, "iso-in", &g_gripe_iso_in);  /* drain iso-IN — REQUIRED or the
                                                          device stalls its control stream */
 }
@@ -805,6 +939,219 @@ static int forward_to_apps(const uint8_t *msg) {
     return 1;
 }
 
+/* ---- --strip-filter: make the strip search's "finger lifted" look like Windows --
+   The strip search (B0 45 deck A, B0 4D deck B) is an absolute 7-bit
+   position. What a host must NOT take as a seek, measured on this V7 through
+   OpenV7 against VirtualDJ (build/vdj-A.log, 2026-11-20):
+
+     release      the value falls to 01 within ~4-20 ms of the finger leaving,
+                  often through one or two transient values on the way
+                  (58 57 01 / 4d 07 01 / 49 35 01 / 3a 19 01); 00 follows
+                  40-600 ms later, or not at all;
+     deck flip    the state dump that follows B0 7D reports the strip as 01;
+     start-up     likewise 01.
+
+   VirtualDJ seeks to every one of those: 01 is 1/127 of the track, ~0.8 %,
+   before the music on most files -- reported as "the song drops back to way
+   before the audio after touching the strip, and after every deck flip".
+   CONTROL-MAP.md's Windows measurement has releases ending at 0, and on
+   Windows VirtualDJ does not jump, so it reads 0 as "lifted". This makes the
+   macOS stream say the same thing:
+
+     - 00 and 01 both mean "not touched": forwarded once, as 00;
+     - everything the finger does in the last moments before a lift, and any
+       touch too short to be meant, is discarded (the delay line below).
+
+   Cost: the bottom two counts of the strip (~1.6 % of a track) no longer seek.
+   Opt-in while it is A/B'd against VirtualDJ; --strip-filter turns it on. */
+static int  g_strip_filter = 1;             /* on by default since 1.1.0; --strip-raw turns it off */
+/* --strip-range LO,HI / --strip-out LO,HI: linear map from the strip's
+   physical travel (input) to the values apps are sent (output).
+
+   Input. Before calibration this V7's travel was narrower than 0..127: the
+   left end read ~0x1c (28) and the right ~0x7c-0x7d (124-125), matching the
+   26..124 of CONTROL-MAP.md's Windows gestures. After the Numark calibration
+   (HOT CUE 1+3 at power-on, 2026-11-20) the travel widened. --strip-range
+   names the travel; unset, it is 2..127 (00 and 01 mean "lifted").
+
+   Output. Unset, 1..STRIP_OUT_MAX -- the first guess, which assumed the host
+   maps 0..127 onto the whole track. VirtualDJ's built-in V7 profile does not:
+   measured against a 3:01 track (2026-11-21), raw 2 landed at -0:14.7 and the
+   middle at 1:33; through --strip-out 11,113, 11 landed at 0:00.7 and 113 at
+   2:55.4. All four fit one line: 0 % at ~10.6, 100 % at ~116.4 -- 1/12 and
+   11/12 of 127, i.e. the profile stretches the middle five sixths of the
+   strip over the track and lets the outer twelfths run before the start and
+   past the end. --strip-out 10,115 keeps the calibrated strip inside it.
+
+   Both are on by default since 1.1.0, set for VirtualDJ; --strip-out 1,127
+   sends the travel as it is (e.g. for Serato or Mixxx), --strip-raw turns the
+   filter and the map off. */
+#define STRIP_OUT_MAX  124
+static int  g_strip_map = 1;                 /* on by default since 1.1.0 (VirtualDJ's window) */
+static int  g_strip_lo = 0, g_strip_hi = 0;  /* input travel, 0,0 = 2..127 */
+#define STRIP_OUT_VDJ_LO 10                 /* VirtualDJ's V7 profile: 0 % at ~10.6 ... */
+#define STRIP_OUT_VDJ_HI 115                /* ... 100 % at ~116.4; 115 rests ~2 s before the end */
+static int  g_strip_olo = STRIP_OUT_VDJ_LO, g_strip_ohi = STRIP_OUT_VDJ_HI; /* 0,0 = 1..STRIP_OUT_MAX */
+static uint8_t strip_scale(int v) {
+    if (!(g_strip_map || g_strip_hi > g_strip_lo) || v <= 1) return (uint8_t)v;   /* 00/01 stay "lifted" */
+    int lo  = g_strip_hi > g_strip_lo ? g_strip_lo : 2;
+    int hi  = g_strip_hi > g_strip_lo ? g_strip_hi : 127;
+    int olo = g_strip_ohi > g_strip_olo ? g_strip_olo : 1;
+    int ohi = g_strip_ohi > g_strip_olo ? g_strip_ohi : STRIP_OUT_MAX;
+    if (v <= lo) return (uint8_t)olo;
+    if (v >= hi) return (uint8_t)ohi;
+    int o = olo + (int)((long)(v - lo) * (ohi - olo) / (hi - lo));
+    return (uint8_t)(o < olo ? olo : o > ohi ? ohi : o);
+}
+/* ---- the filter proper ----------------------------------------------------
+   Rebuilt after the strip calibration (build/vdj-F.log, 2026-11-21). The
+   calibrated strip reads the whole 2..127 and is far noisier at the ends:
+
+     - every lift is preceded by a roll-off, the finger leaving the strip over
+       20-40 ms: 7f 79 69 61 33 2e 2c 18 07 00. The old filter only held falls
+       of more than 12 counts, so the small first steps (7f 79 69 61) went
+       out, and VirtualDJ landed 10-30 s short of where the finger had been --
+       "releasing at the far right bounces to 2:17 / 2:33 / 2:45";
+     - lifts bounce: 00 5b 00 / 00 60 00 5f 02 00 -- blips of 0-36 ms. Every
+       real touch in that log lasted 81 ms or more (99 gestures, a clean gap);
+     - a landing settles over ~30 ms, often from far away: 36 6a 73 78 7b 7f.
+
+   So every strip value now goes through a short delay line instead of
+   straight out. A value is sent STRIP_DELAY_MS after it arrives; a lift
+   throws away everything still waiting and sends one 00. That discards the
+   roll-off (the playhead stays where the finger WAS), swallows the blips
+   (they never outlive the delay), and the values a landing produces during
+   its first STRIP_SETTLE_MS are merged into one, so a landing seeks once,
+   to where it settled. A median of three drops single-sample spikes while
+   the finger is down. Cost: seeks arrive STRIP_DELAY_MS late, and a tap
+   shorter than that does nothing. */
+#define STRIP_DELAY_MS   50   /* replayed vdj-F: 30 ms leaves 13/66 releases off, 50 ms 3 */
+#define STRIP_SETTLE_MS  30
+#define STRIP_Q          64
+#define STRIP_MEDIAN     3    /* samples (odd, 1..5); replayed, 5 was no better than 3 */
+#define STRIP_DIP        10   /* counts: a jump this big that comes straight back ... */
+#define STRIP_DIP_MS     30   /* ... within this long is a pressure dip, not a move */
+static int g_strip_delay_ms = STRIP_DELAY_MS;
+static void (*g_strip_sink)(const uint8_t *m) = NULL;    /* tests capture here */
+/* Send a (raw) strip value to apps, scaled. */
+static void strip_emit(const uint8_t *m) {
+    uint8_t o[3] = { m[0], m[1], strip_scale(m[2]) };
+    if (g_strip_sink) g_strip_sink(o); else midi_to_apps(o, 3);
+}
+static long g_t0_us;                         /* -v timestamps count from here */
+static long now_ms(void);
+static long now_us(void);
+static struct strip_state {
+    int  touched;                            /* finger down since the last 00/01 */
+    int  last_out;                           /* last raw value apps were given (0 = lifted) */
+    long t_land;                             /* ms the finger landed */
+    int  h[4], nh;                           /* recent raw values, for the median */
+    long t_prev;                             /* ms of the previous value */
+    int  qn; struct { long t; uint8_t v; } q[STRIP_Q];
+} g_strip[2];
+static int g_strip_median = STRIP_MEDIAN;
+static int median_of(const int *h, int nh, int v) {          /* median of h[0..nh) and v */
+    int a[5], n = 0;
+    for (int i = 0; i < nh; i++) a[n++] = h[i];
+    a[n++] = v;
+    for (int i = 1; i < n; i++) for (int j = i; j > 0 && a[j - 1] > a[j]; j--) { int t = a[j]; a[j] = a[j - 1]; a[j - 1] = t; }
+    return a[n / 2];
+}
+
+/* One decoded inbound message at time now (ms). Returns how many bytes to
+   forward from out_msg now (0 = nothing now); why is a note for -v. Strip
+   values themselves leave later, from strip_tick_at. */
+static int strip_process_at(const uint8_t *m, int n, uint8_t out_msg[3], const char **why, long now) {
+    static char note[48];
+    *why = NULL;
+    memcpy(out_msg, m, (size_t)(n < 3 ? n : 3));
+    if (!g_strip_filter || n < 3 || m[0] != 0xB0 || (m[1] != 0x45 && m[1] != 0x4D)) return n;
+    struct strip_state *st = &g_strip[m[1] == 0x45 ? 0 : 1];
+    int v = m[2];
+    if (v <= 1) {                                    /* lifted / untouched */
+        int dropped = st->qn;
+        st->qn = 0; st->touched = 0; st->nh = 0;
+        if (dropped) { snprintf(note, sizeof note, "(strip lifted, %d pending dropped)", dropped); *why = note; }
+        if (st->last_out != 0) {
+            st->last_out = 0; out_msg[2] = 0x00;
+            if (!dropped) *why = v ? "(strip lifted: 01 -> 00)" : "(strip lifted)";
+            return 3;
+        }
+        if (!*why) *why = "(strip still lifted, dropped)";
+        return 0;
+    }
+    if (!st->touched) { st->touched = 1; st->t_land = now; st->nh = 0; }
+    if (now - st->t_prev > 20) st->nh = 0;           /* a slow slide: no spike to filter, no lag */
+    st->t_prev = now;
+    int hn = g_strip_median - 1;                     /* history the median needs */
+    int x = st->nh == hn ? median_of(st->h, st->nh, v) : v;
+    if (st->nh < hn) st->h[st->nh++] = v;
+    else if (hn > 0) { memmove(st->h, st->h + 1, sizeof st->h[0] * (size_t)(hn - 1)); st->h[hn - 1] = v; }
+    if (st->qn > 0 && now - st->t_land < STRIP_SETTLE_MS) {
+        st->q[st->qn - 1].v = (uint8_t)x;            /* still landing: one seek, to where it settles */
+        *why = "(strip landing, merged)";
+        return 0;
+    }
+    if (st->qn == STRIP_Q) {                         /* cannot happen at ~4 ms/value; never block */
+        memmove(st->q, st->q + 1, sizeof st->q[0] * (STRIP_Q - 1)); st->qn--;
+    }
+    st->q[st->qn].t = st->qn == 0 && now - st->t_land < STRIP_SETTLE_MS ? st->t_land : now;
+    st->q[st->qn].v = (uint8_t)x; st->qn++;
+    if (x != v) { snprintf(note, sizeof note, "(strip spike %02x -> %02x, queued)", v, x); *why = note; }
+    else *why = "(strip queued)";
+    return 0;
+}
+static int strip_process(const uint8_t *m, int n, uint8_t out_msg[3], const char **why) {
+    return strip_process_at(m, n, out_msg, why, now_ms());
+}
+/* From the main loop: send what has waited out the delay (only the newest of
+   several, so a late tick seeks once). */
+static void strip_tick_at(long now) {
+    if (!g_strip_filter) return;
+    for (int k = 0; k < 2; k++) {
+        struct strip_state *st = &g_strip[k];
+        int ready = 0;
+        while (ready < st->qn && now - st->q[ready].t >= g_strip_delay_ms) ready++;
+        if (!ready) continue;
+        /* Dips: pressing at the far end of the calibrated strip dips the reading
+           for 10-20 ms and it comes straight back (120 116 101 87 86 103 114 125,
+           vdj-G 77.40) -- the "yank near the end". The delay line already holds
+           the next STRIP_DIP_MS of values, so a jump of STRIP_DIP counts or more
+           that returns to within 4 of where it left is skipped. A real move
+           does not come back that fast; a real jump goes through a lift. */
+        int L = st->last_out, emit = -1;
+        for (int i = 0; i < ready; i++) {
+            int v = st->q[i].v;
+            if (L > 1 && (v - L >= STRIP_DIP || L - v >= STRIP_DIP)) {
+                int back = 0;
+                for (int j = i + 1; j < st->qn && st->q[j].t - st->q[i].t <= STRIP_DIP_MS; j++)
+                    if (st->q[j].v - L <= 4 && L - st->q[j].v <= 4) { back = 1; break; }
+                if (back) continue;
+            }
+            L = v; emit = v;
+        }
+        memmove(st->q, st->q + ready, sizeof st->q[0] * (size_t)(st->qn - ready));
+        st->qn -= ready;
+        if (emit < 0) continue;
+        uint8_t msg[3] = { 0xB0, k ? 0x4D : 0x45, (uint8_t)emit };
+        if (msg[2] != st->last_out) {
+            strip_emit(msg);
+            st->last_out = msg[2];
+            if (g_verbose) {
+                char note[48];
+                snprintf(note, sizeof note, "(strip sent -> %02x)", strip_scale(msg[2]));
+                verbose_line("app", msg, 3, note);
+            }
+        }
+    }
+}
+static void strip_tick(void) { strip_tick_at(now_ms()); }
+static void verbose_line(const char *dir, const uint8_t *m, int n, const char *note) {
+    fprintf(stderr, "%9.3f %s ", (now_us() - g_t0_us) / 1e6, dir);
+    for (int k = 0; k < n; k++) fprintf(stderr, "%02x ", m[k]);
+    fprintf(stderr, "%s\n", note ? note : "");
+}
+
 static long     g_jog_n, g_jog_pos_n;          /* 0xE0s and paired position CCs  */
 static long     g_jog_gaps;                    /* position steps > 8 counts = lost frames */
 static int      g_jog_pos_have; static uint8_t g_jog_pos_prev;
@@ -858,23 +1205,29 @@ static void LIBUSB_CALL ctrl_in_cb(struct libusb_transfer *t) {
     int idx = (int)(intptr_t)t->user_data;
     g_in_live[idx] = 0;                                /* no longer in flight */
     if (t->status == LIBUSB_TRANSFER_COMPLETED) {
+        if (g_raw_in && t->actual_length > 0) {
+            fprintf(g_raw_in, "%.6f %d ", (now_us() - g_t0_us) / 1e6, t->actual_length);
+            for (int i = 0; i < t->actual_length; i++) fprintf(g_raw_in, "%02x", t->buffer[i]);
+            fputc('\n', g_raw_in);
+        }
         g_ctrl_bytes += t->actual_length;
         if (t->actual_length > 0) g_last_data_ms = now_ms();   /* the pipe is genuinely alive */
         uint8_t out[3];
         if (g_batch_frame) batch_begin();
         for (int i = 0; i < t->actual_length; i++) {
+            if (in_frame_trailer(t->actual_length, i)) { g_in.pad = 0; continue; }
             int n = midi_feed(&g_in, t->buffer[i], out);
+            if (g_in.sxready) { g_in.sxready = 0; sysex_to_apps(g_in.sx, g_in.sxlen); }
             if (n > 0) {
-                if (forward_to_apps(out)) {
-                    if (g_batch_frame) batch_add(out, n); else midi_to_apps(out, n);
+                const char *why = NULL;
+                uint8_t fwd[3];
+                int nf = strip_process(out, n, fwd, &why);
+                if (nf > 0 && forward_to_apps(fwd)) {
+                    if (g_batch_frame) batch_add(fwd, nf); else midi_to_apps(fwd, nf);
                 }
                 if (g_diag_jog) jog_stat(out, n);
                 if (g_learn) learn_note(out[0], out[1], n == 3 ? out[2] : 0);
-                if (g_verbose) {
-                    fprintf(stderr, "  in  ");
-                    for (int k = 0; k < n; k++) fprintf(stderr, "%02x ", out[k]);
-                    fprintf(stderr, "\n");
-                }
+                if (g_verbose) verbose_line("in ", out, n, why);
             }
         }
         if (g_batch_frame) batch_flush();
@@ -958,6 +1311,71 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--no-timestamps")) g_send_timestamps = 0;
         else if (!strcmp(argv[i], "--no-keepalive")) g_keepalive = 0;
         else if (!strcmp(argv[i], "--supervised")) g_supervised = 1;
+        else if (!strcmp(argv[i], "--tone")) g_audio_tone = 1;
+        else if (!strcmp(argv[i], "--no-feedback")) g_use_feedback = 0;
+        else if (!strcmp(argv[i], "--audio")) {
+            g_audio_on = 1;
+            if (i + 1 < argc && argv[i + 1][0] != '-') g_audio_dev = argv[++i];   /* optional device */
+        }
+        else if (!strcmp(argv[i], "--audio-latency")) {
+            if (i + 1 >= argc) { fprintf(stderr, "OpenV7: --audio-latency needs milliseconds\n"); return 1; }
+            g_audio_ms = atoi(argv[++i]);
+            if (g_audio_ms < 1 || g_audio_ms > 500) { fprintf(stderr, "OpenV7: --audio-latency must be 1..500 ms\n"); return 1; }
+        }
+        else if (!strcmp(argv[i], "--audio-map")) {
+            int a, b, c, d;
+            if (i + 1 >= argc || sscanf(argv[++i], "%d,%d,%d,%d", &a, &b, &c, &d) != 4 || a < 1 || b < 1 || c < 1 || d < 1) {
+                fprintf(stderr, "OpenV7: --audio-map needs four 1-based source channels, e.g. 1,2,3,4\n"); return 1;
+            }
+            g_audio_map[0] = a - 1; g_audio_map[1] = b - 1; g_audio_map[2] = c - 1; g_audio_map[3] = d - 1;
+            g_audio_have_map = 1;
+        }
+        else if (!strcmp(argv[i], "--iso-urb")) {
+            if (i + 1 >= argc) { fprintf(stderr, "OpenV7: --iso-urb needs a packet count\n"); return 1; }
+            g_iso_out_npkt = atoi(argv[++i]);
+            if (g_iso_out_npkt < 8 || g_iso_out_npkt > 40) { fprintf(stderr, "OpenV7: --iso-urb must be 8..40 packets (1..5 ms)\n"); return 1; }
+        }
+        else if (!strcmp(argv[i], "--audio-buffer")) {
+            if (i + 1 >= argc) { fprintf(stderr, "OpenV7: --audio-buffer needs a frame count\n"); return 1; }
+            g_audio_buf = atoi(argv[++i]);
+            if (g_audio_buf < 16 || g_audio_buf > 2048) { fprintf(stderr, "OpenV7: --audio-buffer must be 16..2048 frames\n"); return 1; }
+        }
+        else if (!strcmp(argv[i], "--no-rt")) g_rt = 0;
+        else if (!strcmp(argv[i], "--raw-in")) {
+            if (i + 1 >= argc || !(g_raw_in = fopen(argv[++i], "w"))) { fprintf(stderr, "OpenV7: --raw-in needs a writable file\n"); return 1; }
+            setvbuf(g_raw_in, NULL, _IOFBF, 1 << 20);
+        }
+        else if (!strcmp(argv[i], "--strip-filter")) g_strip_filter = 1;
+        else if (!strcmp(argv[i], "--strip-raw")) { g_strip_filter = 0; g_strip_map = 0; g_strip_olo = g_strip_ohi = 0; }
+        else if (!strcmp(argv[i], "--strip-range")) {
+            if (i + 1 >= argc || sscanf(argv[++i], "%d,%d", &g_strip_lo, &g_strip_hi) != 2 ||
+                g_strip_lo < 2 || g_strip_hi > 127 || g_strip_hi - g_strip_lo < 16) {
+                fprintf(stderr, "OpenV7: --strip-range needs LO,HI with 2 <= LO, HI <= 127, e.g. 28,124\n"); return 1;
+            }
+            g_strip_filter = g_strip_map = 1;   /* calibration only makes sense on the cleaned stream */
+        }
+        else if (!strcmp(argv[i], "--strip-delay")) {
+            if (i + 1 >= argc || (g_strip_delay_ms = atoi(argv[++i])) < 0 || g_strip_delay_ms > 200) {
+                fprintf(stderr, "OpenV7: --strip-delay needs 0..200 ms\n"); return 1;
+            }
+            g_strip_filter = 1;
+        }
+        else if (!strcmp(argv[i], "--strip-out")) {
+            if (i + 1 >= argc || sscanf(argv[++i], "%d,%d", &g_strip_olo, &g_strip_ohi) != 2 ||
+                g_strip_olo < 1 || g_strip_ohi > 127 || g_strip_ohi - g_strip_olo < 16) {
+                fprintf(stderr, "OpenV7: --strip-out needs LO,HI with 1 <= LO, HI <= 127, e.g. 26,124\n"); return 1;
+            }
+            g_strip_filter = g_strip_map = 1;
+        }
+        else if (!strcmp(argv[i], "--midi-name")) {
+            if (i + 1 >= argc) { fprintf(stderr, "OpenV7: --midi-name needs a name\n"); return 1; }
+            g_midi_name = argv[++i];
+        }
+        else if (!strcmp(argv[i], "--iso-depth")) {
+            if (i + 1 >= argc) { fprintf(stderr, "OpenV7: --iso-depth needs a number\n"); return 1; }
+            g_iso_depth_req = atoi(argv[++i]);
+            if (g_iso_depth_req < 2 || g_iso_depth_req > ISO_NXFER) { fprintf(stderr, "OpenV7: --iso-depth must be 2..%d\n", ISO_NXFER); return 1; }
+        }
         else if (!strcmp(argv[i], "--replay")) {
             if (i + 1 >= argc) { fprintf(stderr, "OpenV7: --replay needs a capture file\n"); return 1; }
             g_replay_path = argv[++i];
@@ -968,10 +1386,62 @@ int main(int argc, char **argv) {
             printf("OpenV7 — Numark V7 userspace driver\n"
                    "usage: openv7 [-v|--verbose] [--learn] [--diag] [--diag-jog]\n"
                    "       [--no-timestamps] [--no-keepalive]\n"
+                   "       [--tone | --audio [DEVICE] [--audio-latency MS] [--audio-map A,B,C,D]]\n"
+                   "       [--audio-buffer FRAMES] [--iso-urb PACKETS] [--iso-depth N]\n"
+                   "       [--no-feedback] [--no-rt] [--midi-name NAME] [--strip-raw]\n"
+                   "       [--strip-range LO,HI] [--strip-out LO,HI] [--strip-delay MS]\n"
                    "       [--replay FILE [--replay-loop] [--legacy-parse]]\n"
                    "  -v        print decoded MIDI as it arrives\n"
                    "  --learn   catalog each control once (touch every control, Ctrl-C for the map)\n"
                    "  --diag    print isochronous stream health once a second (~200/~62 = healthy)\n"
+                   "  --tone    play a test tone out of the V7 itself: 440 Hz on the DECK A outputs,\n"
+                   "            660 Hz on DECK B, -18 dBFS. Proves the USB audio path with nothing\n"
+                   "            else involved. Turn your mixer down first.\n"
+                   "  --audio [DEVICE]\n"
+                   "            play whatever goes into a CoreAudio device out of the V7's outputs.\n"
+                   "            Default: the \"Numark V7\" device from driver/ (pick it as the output\n"
+                   "            in your DJ app). DEVICE can name any input device instead, e.g.\n"
+                   "            \"BlackHole 16ch\". Channels 1/2 -> DECK A, 3/4 -> DECK B.\n"
+                   "  --audio-latency MS\n"
+                   "            extra audio kept queued against dropouts (default %d ms)\n"
+                   "  --audio-map A,B,C,D\n"
+                   "            source channels (1-based) for DECK A L,R and DECK B L,R\n"
+                   "  --audio-buffer FRAMES\n"
+                   "            CoreAudio IO buffer the bridge asks for when recording the\n"
+                   "            Numark V7 device (default 256; 64 or 128 for low latency)\n"
+                   "  --iso-urb PACKETS\n"
+                   "            microframes per iso-OUT URB, 8..40 (default 40 = 5 ms; 8 = 1 ms)\n"
+                   "  --iso-depth N\n"
+                   "            iso-OUT URBs in flight (default 16; 8 with audio). The deck's\n"
+                   "            share of the latency is N x PACKETS / 8 ms: 40 ms by default,\n"
+                   "            4 ms with --iso-urb 8 --iso-depth 4. Lower = less latency,\n"
+                   "            higher = more dropout-proof. tools/latency-sweep.sh finds the floor.\n"
+                   "  --no-rt   with audio on, the USB thread runs as a real-time thread;\n"
+                   "            this keeps it at normal priority instead\n"
+                   "  --midi-name NAME\n"
+                   "            name of the CoreMIDI port (default \"Numark V7\"; Windows calls it\n"
+                   "            \"Numark V7 MIDI\"). The menu-bar app expects the default.\n"
+                   "  --raw-in FILE\n"
+                   "            write every control-IN transfer to FILE as hex (diagnostics)\n"
+                   "  --strip-raw\n"
+                   "            pass the strip search through untouched. By default it is cleaned\n"
+                   "            up the way Windows does (one 00 when the finger lifts; the roll-off,\n"
+                   "            bounces and spikes around a touch discarded, so the playhead stays\n"
+                   "            where the finger was) and mapped for VirtualDJ (--strip-out 10,115).\n"
+                   "  --strip-delay MS\n"
+                   "            how long strip values wait before going out (default 50); a lift\n"
+                   "            inside that time cancels them.\n"
+                   "  --strip-range LO,HI\n"
+                   "            the strip's physical ends as the deck reports them (default 2,127).\n"
+                   "  --strip-out LO,HI\n"
+                   "            what those ends are sent to apps as (default 10,115). VirtualDJ's V7\n"
+                   "            profile maps ~10.6..116.4 onto the track: 10,115 puts the far left\n"
+                   "            a second before the start and the far right ~2 s before the end.\n"
+                   "            1,127 sends the strip's travel as it is.\n"
+                   "  --no-feedback\n"
+                   "            ignore the deck's rate feedback (iso IN 0x81) and send a fixed\n"
+                   "            44,100 frames/s, as before. A/B only: the deck's clock runs\n"
+                   "            faster than that, so its outputs glitch every ~20 s.\n"
                    "  --no-timestamps\n"
                    "            suppress the platter's 0xE0 timestamp messages. Diagnostic:\n"
                    "            VirtualDJ drives the jog FROM them, so this silences the jog\n"
@@ -999,13 +1469,15 @@ int main(int argc, char **argv) {
                    "  --supervised\n"
                    "            exit when the launching parent process goes away, instead of\n"
                    "            lingering as an orphan that holds the USB interfaces and blocks\n"
-                   "            every later bridge from claiming them. Used by OpenV7.app.\n");
+                   "            every later bridge from claiming them. Used by OpenV7.app.\n",
+                   AUDIO_DEFAULT_LATENCY_MS);
             return 0;
         }
     }
 
     if (getenv("OPENV7_DIAG")) g_diag = 1;   /* also enable diag via environment */
 
+    g_t0_us = now_us();
     signal(SIGINT, on_sigint);
     signal(SIGTERM, on_sigint);
     signal(SIGUSR1, on_sigusr1);
@@ -1029,9 +1501,11 @@ int main(int argc, char **argv) {
        still exercised, which is the whole point. */
     if (g_replay_path) {
         MIDIClientCreate(CFSTR("OpenV7"), NULL, NULL, &g_client);
-        MIDISourceCreate(g_client, CFSTR("Numark V7"), &g_source);
-        MIDIDestinationCreate(g_client, CFSTR("Numark V7"), dest_read, NULL, &g_dest);
-        fprintf(stderr, "OpenV7: CoreMIDI device \"Numark V7\" is live (replay; no device attached).\n");
+        CFStringRef mname = CFStringCreateWithCString(NULL, g_midi_name, kCFStringEncodingUTF8);
+        MIDISourceCreate(g_client, mname, &g_source);
+        MIDIDestinationCreate(g_client, mname, dest_read, NULL, &g_dest);
+        CFRelease(mname);
+        fprintf(stderr, "OpenV7: CoreMIDI device \"%s\" is live (replay; no device attached).\n", g_midi_name);
         int rc = replay_run(g_replay_path);
         MIDIEndpointDispose(g_source);
         MIDIEndpointDispose(g_dest);
@@ -1083,25 +1557,60 @@ int main(int argc, char **argv) {
 
     /* CoreMIDI virtual device */
     MIDIClientCreate(CFSTR("OpenV7"), NULL, NULL, &g_client);
-    MIDISourceCreate(g_client, CFSTR("Numark V7"), &g_source);
-    MIDIDestinationCreate(g_client, CFSTR("Numark V7"), dest_read, NULL, &g_dest);
-    fprintf(stderr, "OpenV7: CoreMIDI device \"Numark V7\" is live.\n");
+    { CFStringRef mname = CFStringCreateWithCString(NULL, g_midi_name, kCFStringEncodingUTF8);
+      MIDISourceCreate(g_client, mname, &g_source);
+      MIDIDestinationCreate(g_client, mname, dest_read, NULL, &g_dest);
+      CFRelease(mname); }
+    fprintf(stderr, "OpenV7: CoreMIDI device \"%s\" is live.\n", g_midi_name);
 
-    /* iso-OUT audio clock (silence) */
-    for (int i = 0; i < ISO_NXFER; i++) {
-        /* Allocate for the WORST case (all 72 B packets) and never touch the
-           bytes again — silence is zeros, and iso_pace() only moves the lengths.
+    /* Audio source for the iso stream. Opened before the ring is armed so the
+       very first URBs already carry it; on any failure the stream stays
+       silence and control is unaffected. */
+    if (g_audio_tone) audio_open_tone();
+    else if (g_audio_on)
+        audio_open_device(g_audio_dev, g_audio_ms, g_audio_buf, g_iso_out_npkt * V7FB_MAX_FRAMES,
+                          g_audio_have_map ? g_audio_map : NULL, 1);
+    g_iso_out_nxfer = g_iso_depth_req ? g_iso_depth_req : (audio_active() ? ISO_NXFER_AUDIO : ISO_NXFER);
+    if (audio_active()) {
+        fprintf(stderr, "OpenV7: audio: iso-OUT %d URBs x %d packets = %.1f ms queued to the deck.\n",
+                g_iso_out_nxfer, g_iso_out_npkt, g_iso_out_nxfer * g_iso_out_npkt / 8.0);
+        /* With audio the USB event thread is on the audio path: every iso-OUT
+           URB is rendered when its predecessor completes. A real-time
+           (time-constraint) thread is scheduled ahead of everything ordinary,
+           which is what lets the queue be a few ms deep. Period = one URB. */
+        if (g_rt) {
+            mach_timebase_info_data_t tb; mach_timebase_info(&tb);
+            double ticks_per_ms = 1e6 * (double)tb.denom / (double)tb.numer;
+            double period_ms = g_iso_out_npkt / 8.0;
+            thread_time_constraint_policy_data_t pol;
+            pol.period      = (uint32_t)(period_ms * ticks_per_ms);
+            pol.computation = (uint32_t)(0.15 * ticks_per_ms);
+            pol.constraint  = (uint32_t)((period_ms < 1.0 ? period_ms : 1.0) * ticks_per_ms);
+            pol.preemptible = 1;
+            kern_return_t kr = thread_policy_set(mach_thread_self(), THREAD_TIME_CONSTRAINT_POLICY,
+                                                 (thread_policy_t)&pol, THREAD_TIME_CONSTRAINT_POLICY_COUNT);
+            fprintf(stderr, "OpenV7: audio: USB thread %s\n",
+                    kr == KERN_SUCCESS ? "is real-time" : "could not be made real-time (continuing)");
+        }
+    }
+
+    v7fb_init(&g_fb);
+
+    /* iso-OUT: the audio clock, and with --audio/--tone the audio itself */
+    for (int i = 0; i < g_iso_out_nxfer; i++) {
+        /* Allocate for the WORST case (all 72 B packets). Silence is the calloc's
+           zeros; with audio on, iso_pace() renders into it before every submit.
            NOT V7_ISO_PKT_SIZE (156): that is the endpoint ceiling, not the
            amount the device is fed. */
-        unsigned char *b = calloc(1, V7_ISO_PKT_MAX * ISO_NPKT_OUT);
-        g_iso_out[i] = libusb_alloc_transfer(ISO_NPKT_OUT);
+        unsigned char *b = calloc(1, (size_t)V7_ISO_PKT_MAX * (size_t)g_iso_out_npkt);
+        g_iso_out[i] = libusb_alloc_transfer(g_iso_out_npkt);
         /* Bail rather than limp. A short iso ring is not a degraded stream, it
            is the "healthy from the outside, dead on the wire" failure mode the
            arm_iso comment describes -- and an unchecked calloc here would hand
            libusb a NULL buffer and crash instead. */
         if (!b || !g_iso_out[i]) { fprintf(stderr, "OpenV7: out of memory building the iso-OUT ring\n"); return 5; }
         libusb_fill_iso_transfer(g_iso_out[i], g_dev, V7_EP_AUDIO_OUT, b,
-                                 V7_ISO_PKT_MAX * ISO_NPKT_OUT, ISO_NPKT_OUT, iso_cb,
+                                 V7_ISO_PKT_MAX * g_iso_out_npkt, g_iso_out_npkt, iso_cb,
                                  (void *)(intptr_t)i, 1000);
         arm_iso(g_iso_out[i], &g_iso_out_live[i], 1, "iso-out", &g_gripe_iso_out);   /* paces, then submits checked */
     }
@@ -1139,7 +1648,7 @@ int main(int argc, char **argv) {
         fprintf(stderr, "OpenV7: running. Select \"Numark V7\" in your DJ app. Ctrl-C to stop.\n");
     g_last_data_ms = now_ms();
 
-    long diag_o0 = 0, diag_i0 = 0; time_t diag_t = time(NULL), rearm_t = time(NULL);
+    long diag_o0 = 0, diag_i0 = 0; time_t diag_t = time(NULL), rearm_t = time(NULL), ff_t = time(NULL);
     time_t jog_t = time(NULL);
     /* Wall-clock seconds tick at an arbitrary point relative to startup, so the
        first --diag-jog window is a partial second. The implied-clock figure is
@@ -1152,6 +1661,7 @@ int main(int argc, char **argv) {
     while (!g_quit) {
         struct timeval tv = { 0, 20000 };
         libusb_handle_events_timeout(g_ctx, &tv);
+        strip_tick();           /* release a held strip value nobody contradicted */
         clear_halt_drain();     /* stall recovery, deferred out of the callbacks */
         /* Escalate a pipe that clear_halt cannot fix. Without this the bridge
            spins on PIPE indefinitely while reporting itself healthy. */
@@ -1200,6 +1710,14 @@ int main(int argc, char **argv) {
                                   : "one packet list per message (original)");
         }
         /* EP0 status re-arm, every 2 s (secondary keepalive) — legacy only. */
+        /* Once a second, tell the resampler the deck's real rate (frames per
+           feedback packet x 1000), so it feeds forward instead of letting the
+           ring drift to find it. Cumulative: the counts are exact integers. */
+        { time_t now = time(NULL);
+          if (now != ff_t) {
+              ff_t = now;
+              if (g_fb.valid >= 2000) audio_set_deck_rate(1000.0 * (double)g_fb.frames / (double)g_fb.valid);
+          } }
         if (g_keepalive) { time_t now = time(NULL);
           if (now - rearm_t >= 2) { ploytec_rearm(); rearm_t = now; } }
         /* Orphan check: the parent died and we were reparented. Release the USB
@@ -1219,10 +1737,10 @@ int main(int argc, char **argv) {
            gone from the ring with no callback to notice; without this the ring
            drains silently and takes the control stream with it. No-op when all
            32 are in flight, which is the normal case. */
-        for (int i = 0; i < ISO_NXFER; i++) {
+        for (int i = 0; i < g_iso_out_nxfer; i++)
             arm_iso(g_iso_out[i], &g_iso_out_live[i], 1, "iso-out", &g_gripe_iso_out);
+        for (int i = 0; i < ISO_NXFER; i++)
             arm_iso(g_iso_in[i],  &g_iso_in_live[i],  0, "iso-in",  &g_gripe_iso_in);
-        }
         /* drain outgoing MIDI to the device */
         int sent_real = 0;
         pthread_mutex_lock(&outq_mtx);
@@ -1256,16 +1774,30 @@ int main(int argc, char **argv) {
             time_t now = time(NULL);
             if (now != diag_t) {
                 int iso_armed = 0, in_armed = 0;
-                for (int i = 0; i < ISO_NXFER; i++) iso_armed += g_iso_out_live[i] + g_iso_in_live[i];
+                for (int i = 0; i < g_iso_out_nxfer; i++) iso_armed += g_iso_out_live[i];
+                for (int i = 0; i < ISO_NXFER; i++)       iso_armed += g_iso_in_live[i];
                 /* Counted with a LOOP, not g_in_live[0]+[1]+[2]+[3]. The unrolled
                    version silently under-reported the moment CTRL_IN_NXFER changed
                    -- a health readout that lies when you tune the thing it measures
                    is worse than no readout. */
                 for (int i = 0; i < CTRL_IN_NXFER; i++) in_armed += g_in_live[i];
-                fprintf(stderr, "  [diag] iso-out/s=%ld iso-in/s=%ld  ctrl-bytes=%ld in-armed=%d/%d iso-armed=%d/%d  (healthy: ~200/~62)\n",
+                char abuf[200];
+                audio_diag(abuf, sizeof abuf);
+                /* The deck's own playback rate as its feedback reports it. ~44108
+                   on the V7 tested so far (its crystal vs the host's). "ok" should
+                   be ~1000 packets/s; "bad" counts packets that were not a sane
+                   3-byte count; "miss" > 0 after startup means the pacing had to
+                   fall back to the fixed rate. */
+                static uint64_t fb_f0, fb_v0;
+                fprintf(stderr, "  [diag] iso-out/s=%ld iso-in/s=%ld  ctrl-bytes=%ld in-armed=%d/%d iso-armed=%d/%d  (healthy: ~%d/~62)"
+                                "  deck=%llu/s fb-ok=%llu/s bad=%llu miss=%llu%s  %s\n",
                         g_isoout_cmpl - diag_o0, g_isoin_cmpl - diag_i0, g_ctrl_bytes,
                         in_armed, CTRL_IN_NXFER,
-                        iso_armed, ISO_NXFER * 2);
+                        iso_armed, g_iso_out_nxfer + ISO_NXFER, 8000 / g_iso_out_npkt,
+                        (unsigned long long)(g_fb.frames - fb_f0), (unsigned long long)(g_fb.valid - fb_v0),
+                        (unsigned long long)g_fb.bad, (unsigned long long)g_fb.misses,
+                        g_use_feedback ? "" : " (feedback OFF)", abuf);
+                fb_f0 = g_fb.frames; fb_v0 = g_fb.valid;
                 diag_o0 = g_isoout_cmpl; diag_i0 = g_isoin_cmpl; diag_t = now;
             }
         }
@@ -1311,7 +1843,8 @@ int main(int argc, char **argv) {
        stream to the zero-bandwidth alt setting, and release the interfaces.
        Skipping this leaves the device mid-stream and can jam the control stream
        on the next launch. */
-    for (int i = 0; i < ISO_NXFER; i++) { libusb_cancel_transfer(g_iso_out[i]); libusb_cancel_transfer(g_iso_in[i]); }
+    for (int i = 0; i < g_iso_out_nxfer; i++) libusb_cancel_transfer(g_iso_out[i]);
+    for (int i = 0; i < ISO_NXFER; i++)       libusb_cancel_transfer(g_iso_in[i]);
     for (int i = 0; i < CTRL_IN_NXFER; i++) libusb_cancel_transfer(g_t_in[i]);
     libusb_cancel_transfer(t_aux);
     for (int i = 0; i < 12; i++) { struct timeval tv = { 0, 50000 }; libusb_handle_events_timeout(g_ctx, &tv); }
@@ -1319,10 +1852,12 @@ int main(int argc, char **argv) {
         libusb_set_interface_alt_setting(g_dev, i, 0);   /* zero-bandwidth alt: stop the stream cleanly */
         libusb_release_interface(g_dev, i);
     }
+    audio_close();
     MIDIEndpointDispose(g_source);
     MIDIEndpointDispose(g_dest);
     MIDIClientDispose(g_client);
     libusb_close(g_dev);
+    if (g_raw_in) fclose(g_raw_in);
     libusb_exit(g_ctx);
     /* Non-zero after a stall reset so the supervising app relaunches us into a
        full fresh bring-up, which is what actually clears the fault. */

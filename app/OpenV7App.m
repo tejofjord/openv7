@@ -954,6 +954,45 @@ static void MIDIReadCB(const MIDIPacketList *pl, void *a, void *b) {
     pthread_mutex_unlock(&g_rxmtx);
 }
 
+/* ---- the Numark V7 audio device (driver/), bundled in Resources since 1.1.0 ----
+   Installing it needs root (/Library/Audio/Plug-Ins/HAL) and a Core Audio
+   restart -- the same two steps as ./install.sh --audio-driver, done here with
+   the standard macOS password prompt so a DMG user never needs Terminal.
+   The copy is made world-readable: coreaudiod reads plug-ins as its own user,
+   and a bundle whose Info.plist only root can read is skipped without a single
+   log line (found 2026-11-21: a checkout with 600 modes, copied with cp -R). */
+static NSString *const kV7Driver = @"/Library/Audio/Plug-Ins/HAL/NumarkV7.driver";
+static NSString *shq(NSString *s) {                 /* single-quote for /bin/sh */
+    return [NSString stringWithFormat:@"'%@'", [s stringByReplacingOccurrencesOfString:@"'" withString:@"'\\''"]];
+}
+
+
+/* ---- audio latency presets, passed to the bridge (menu > Audio Latency) ----
+   The buffer is the CoreAudio IO size the bridge records the "Numark V7"
+   device with; the lower two presets also shorten the USB transfers to the deck
+   (--iso-urb), which is where most of the remaining delay sits. Lower = less
+   delay between the DJ app and the RCA outputs, but less slack before a busy
+   Mac crackles. Kept in user defaults; a change restarts the bridge. */
+static NSString *const kLatencyKey = @"audioLatency";
+static NSArray<NSDictionary*> *latencyPresets(void) {
+    return @[
+        @{@"key":@"safe",   @"title":@"Safe (512)",           @"args":@[@"--audio-buffer", @"512"]},
+        @{@"key":@"normal", @"title":@"Normal (256, default)", @"args":@[]},
+        @{@"key":@"low",    @"title":@"Low (128)",            @"args":@[@"--audio-buffer", @"128", @"--iso-urb", @"16"]},
+        @{@"key":@"lowest", @"title":@"Lowest (64)",          @"args":@[@"--audio-buffer", @"64",  @"--iso-urb", @"8"]},
+    ];
+}
+static NSString *latencyKey(void) {
+    NSString *k=[[NSUserDefaults standardUserDefaults] stringForKey:kLatencyKey];
+    for(NSDictionary *p in latencyPresets()) if([p[@"key"] isEqualToString:k]) return k;
+    return @"normal";
+}
+static NSArray *latencyArgs(void) {
+    NSString *k=latencyKey();
+    for(NSDictionary *p in latencyPresets()) if([p[@"key"] isEqualToString:k]) return p[@"args"];
+    return @[];
+}
+
 @implementation AppDelegate
 
 - (NSString*)bridgePath { return [[NSBundle mainBundle] pathForAuxiliaryExecutable:@"openv7-bridge"]; }
@@ -967,7 +1006,12 @@ static void MIDIReadCB(const MIDIPacketList *pl, void *a, void *b) {
        never runs and the bridge is orphaned while still holding both USB
        interfaces -- after which every relaunch is refused with
        LIBUSB_ERROR_ACCESS. The flag makes the child exit on reparenting. */
-    t.arguments = @[@"--supervised"];
+    t.arguments = @[@"--supervised",
+    /* --audio: play the "Numark V7" CoreAudio device out of the deck's own RCA
+       outputs. A no-op (logged, control unaffected) when that device -- the
+       driver/ plug-in -- is not installed, so it is always passed. */
+                    @"--audio"];
+    t.arguments = [t.arguments arrayByAddingObjectsFromArray:latencyArgs()];   /* menu > Audio Latency */
     t.qualityOfService = NSQualityOfServiceUserInteractive;   /* keep the child un-throttled */
     t.standardOutput=[NSFileHandle fileHandleWithNullDevice];
     /* Keep the bridge's status lines (handshake, teardown) in a support log --
@@ -1367,6 +1411,72 @@ static void MIDIReadCB(const MIDIPacketList *pl, void *a, void *b) {
         _loginItem.state=(SMAppService.mainAppService.status==SMAppServiceStatusEnabled)?NSControlStateValueOn:NSControlStateValueOff;
     [self updateMidiStat];
 }
+- (void)setLatency:(NSMenuItem*)mi {
+    if(!mi.representedObject || [mi.representedObject isEqualToString:latencyKey()]) return;
+    [[NSUserDefaults standardUserDefaults] setObject:mi.representedObject forKey:kLatencyKey];
+    [self restart:nil];                  /* the bridge reads it at launch */
+}
+- (BOOL)validateMenuItem:(NSMenuItem*)mi {
+    if(mi.action==@selector(setLatency:)){
+        mi.state=[mi.representedObject isEqualToString:latencyKey()] ? NSControlStateValueOn : NSControlStateValueOff;
+        return YES;
+    }
+    if(mi.action==@selector(toggleAudioDevice:)){
+        BOOL inst=[[NSFileManager defaultManager] fileExistsAtPath:kV7Driver];
+        mi.title= inst ? @"Remove Audio Device…" : @"Install Audio Device…";
+        return inst || [[NSBundle mainBundle] pathForResource:@"NumarkV7" ofType:@"driver"]!=nil;
+    }
+    return YES;
+}
+- (void)toggleAudioDevice:(id)s { (void)s;
+    BOOL inst=[[NSFileManager defaultManager] fileExistsAtPath:kV7Driver];
+    NSString *src=[[NSBundle mainBundle] pathForResource:@"NumarkV7" ofType:@"driver"];
+    if(!inst && !src) return;
+    NSAlert *a=[NSAlert new];
+    if(inst){
+        a.messageText=@"Remove the Numark V7 audio device?";
+        a.informativeText=@"The \"Numark V7\" sound output goes away; the controls keep working.\n\n"
+            "macOS asks for your password, and all audio stops for a moment while Core Audio restarts.";
+        [a addButtonWithTitle:@"Remove"];
+    } else {
+        a.messageText=@"Install the Numark V7 audio device?";
+        a.informativeText=@"Adds a \"Numark V7\" sound output: channels 1–2 play from DECK A's outputs, "
+            "3–4 from DECK B. Pick it as the audio output in your DJ app.\n\n"
+            "macOS asks for your password (the device goes in /Library/Audio/Plug-Ins/HAL), and all audio "
+            "stops for a moment while Core Audio restarts. Afterwards macOS may ask whether OpenV7 may use "
+            "the microphone. Say yes: that is how OpenV7 receives what is played to the Numark V7 device. "
+            "Nothing is recorded.";
+        [a addButtonWithTitle:@"Install"];
+    }
+    [a addButtonWithTitle:@"Cancel"];
+    [NSApp activateIgnoringOtherApps:YES];
+    if([a runModal]!=NSAlertFirstButtonReturn) return;
+
+    NSString *restart=@"(launchctl kickstart -k system/com.apple.audio.coreaudiod || killall -9 coreaudiod)";
+    NSString *sh = inst
+        ? [NSString stringWithFormat:@"rm -rf %@ && %@", shq(kV7Driver), restart]
+        : [NSString stringWithFormat:@"mkdir -p /Library/Audio/Plug-Ins/HAL && rm -rf %@ && cp -R %@ %@ && "
+                                      "chown -R root:wheel %@ && chmod -R u=rwX,go=rX %@ && "
+                                      "(xattr -dr com.apple.quarantine %@ || true) && %@",
+                                      shq(kV7Driver), shq(src), shq(kV7Driver),
+                                      shq(kV7Driver), shq(kV7Driver), shq(kV7Driver), restart];
+    NSString *esc=[[sh stringByReplacingOccurrencesOfString:@"\\" withString:@"\\\\"]
+                       stringByReplacingOccurrencesOfString:@"\"" withString:@"\\\""];
+    NSString *src_as=[NSString stringWithFormat:@"do shell script \"%@\" with administrator privileges", esc];
+    NSDictionary *err=nil;
+    [[[NSAppleScript alloc] initWithSource:src_as] executeAndReturnError:&err];
+    if(err){
+        if([err[NSAppleScriptErrorNumber] intValue]==-128) return;      /* cancelled at the password prompt */
+        NSAlert *e=[NSAlert new];
+        e.messageText= inst ? @"Could not remove the audio device" : @"Could not install the audio device";
+        e.informativeText=[err[NSAppleScriptErrorMessage] description] ?: @"Unknown error.";
+        [e runModal];
+        return;
+    }
+    /* Core Audio takes a few seconds to come back with the device; then restart
+       the bridge so it opens (or lets go of) it. */
+    [self performSelector:@selector(restart:) withObject:nil afterDelay:4.0];
+}
 - (void)toggleLogin:(id)s { (void)s;
     if(@available(macOS 13.0,*)){ NSError *e=nil; SMAppService *svc=SMAppService.mainAppService;
         if(svc.status==SMAppServiceStatusEnabled)[svc unregisterAndReturnError:&e]; else [svc registerAndReturnError:&e]; }
@@ -1395,6 +1505,18 @@ static void MIDIReadCB(const MIDIPacketList *pl, void *a, void *b) {
     [m addItem:[NSMenuItem separatorItem]];
     [m addItemWithTitle:@"Open Tester…" action:@selector(openTester:) keyEquivalent:@"t"];
     [m addItemWithTitle:@"Calibration…" action:@selector(openCalibration:) keyEquivalent:@""];
+    [m addItemWithTitle:@"Install Audio Device…" action:@selector(toggleAudioDevice:) keyEquivalent:@""];
+    NSMenuItem *lat=[[NSMenuItem alloc] initWithTitle:@"Audio Latency" action:nil keyEquivalent:@""];
+    NSMenu *lm=[NSMenu new];
+    for(NSDictionary *p in latencyPresets()){
+        NSMenuItem *li=[lm addItemWithTitle:p[@"title"] action:@selector(setLatency:) keyEquivalent:@""];
+        li.representedObject=p[@"key"]; li.target=self;
+    }
+    [lm addItem:[NSMenuItem separatorItem]];
+    NSMenuItem *note=[lm addItemWithTitle:@"Lower = less delay; raise it if you hear crackles" action:nil keyEquivalent:@""];
+    note.enabled=NO;
+    lat.submenu=lm;
+    [m addItem:lat];
     [m addItemWithTitle:@"Restart bridge" action:@selector(restart:) keyEquivalent:@"r"];
     _loginItem=[[NSMenuItem alloc] initWithTitle:@"Open at Login" action:@selector(toggleLogin:) keyEquivalent:@""];
     [m addItem:_loginItem];

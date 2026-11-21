@@ -70,10 +70,14 @@ Two consequences worth knowing before debugging a mapping:
   true, which is how we know the built-in one is running.
 - On Windows it **commands the motor**, sending `b0 41 7f` on play and
   `b0 42 7f` on stop (captured from a working system —
-  `captures/vdj/vdj-outbound-0x04.tsv`). On macOS it has never been observed
-  sending `B0 41`/`0x42`/`0x43` in any capture, though it does drive the LEDs.
-  Same definition, different behaviour, so the gap is in how VirtualDJ binds our
-  CoreMIDI source rather than in what it knows about the deck.
+  `captures/vdj/vdj-outbound-0x04.tsv`).
+- ✅ **On macOS it does too** (2026-11-20, `openv7 -v`, VirtualDJ started
+  *after* the bridge): on connect it sends a full LED reset plus `b0 42 7f` /
+  `b0 4c 7f` (stop both motors) and `b0 45 00` (33 RPM), then `b0 41 7f` /
+  `b0 4b 7f` on PLAY and `b0 42 7f` / `b0 4c 7f` on stop, for deck A and B. It
+  sent no SysEx at all, so it does not identify the deck that way. The earlier
+  "never observed on macOS" captures were probably taken with VirtualDJ already
+  running when the bridge appeared, so its connect-time setup never ran.
 
 > ⚠️ The button/pad/LED rows are cross-referenced, not yet confirmed on a
 > physical unit. If a control misbehaves, please contribute the corrected value

@@ -46,8 +46,8 @@ echo "==> building self-contained bridge (static libusb)"
 clang -O2 -std=c11 -Wall -Wextra -Wno-deprecated-declarations \
   -isysroot "$SDK" -mmacosx-version-min="$MACOS_MIN" \
   -I"$LIBUSB_PREFIX/include/libusb-1.0" \
-  src/main.c src/nonap.m "$LIBUSB_A" \
-  -framework CoreMIDI -framework CoreFoundation -framework Foundation -framework IOKit -framework Security \
+  src/main.c src/nonap.m src/audio.c src/v7ring.c "$LIBUSB_A" \
+  -framework CoreMIDI -framework CoreAudio -framework CoreFoundation -framework Foundation -framework IOKit -framework Security \
   -o "$BUILD/openv7-bridge"
 
 echo "==> building menu-bar app"
@@ -66,6 +66,16 @@ cp app/AppIcon.icns     "$APP/Contents/Resources/AppIcon.icns"
 cp "$BUILD/OpenV7"       "$APP/Contents/MacOS/OpenV7"
 cp "$BUILD/openv7-bridge" "$APP/Contents/MacOS/openv7-bridge"
 chmod +x "$APP/Contents/MacOS/"*
+
+# The "Numark V7" audio device rides along in Resources; the app's menu item
+# "Install Audio Device…" copies it into /Library/Audio/Plug-Ins/HAL. Built (and
+# signed) by its own script first, so the app's signature below seals it.
+echo "==> building the Numark V7 audio device"
+./driver/build-driver.sh | sed 's/^/    /'
+cp -R "$BUILD/NumarkV7.driver" "$APP/Contents/Resources/NumarkV7.driver"
+# Readable by everyone whatever this checkout's modes: the app is dragged to
+# /Applications as-is, and the audio device is copied on from here.
+chmod -R u=rwX,go=rX "$APP"
 
 # Signing. DEVELOPER_ID (a "Developer ID Application: ..." identity) upgrades this
 # from ad-hoc to a distributable signature; NOTARY_PROFILE additionally submits
@@ -101,6 +111,8 @@ echo "==> verifying the recorded versions (BOTH gate launch, so check both):"
 for bin in OpenV7 openv7-bridge; do
   ./tools/check-stamps.sh "$APP/Contents/MacOS/$bin" "$MACOS_MIN"
 done
+./tools/check-stamps.sh "$APP/Contents/Resources/NumarkV7.driver/Contents/MacOS/NumarkV7" \
+  "$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' driver/Info.plist)"
 
 echo "==> building DMG"
 DMG="$BUILD/OpenV7.dmg"
