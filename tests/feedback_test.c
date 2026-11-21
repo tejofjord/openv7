@@ -34,8 +34,11 @@ typedef struct {
 } result;
 
 /* ppm: deck clock vs USB. depth: OUT URBs in flight. drop_in_at: seconds at
-   which one IN URB's feedback is lost (<0 = never). */
-static result run(double ppm, int use_fb, int depth, double seconds, double drop_in_at) {
+   which the first of n_drops IN URBs is lost (<0 = never), one more every second
+   after. track_lost: what isoin_cb does with a lost URB -- 1 = account for its
+   16 ms (v7fb_packet with no data, as src/main.c now does), 0 = skip it whole. */
+static result run(double ppm, int use_fb, int depth, double seconds, double drop_in_at,
+                  int n_drops, int track_lost) {
     result R = { 1e9, -1e9, 0, 0, 0, {{0}, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0} };
     v7fb_init(&R.fb);
     static uint8_t sched[SCHED];
@@ -85,8 +88,10 @@ static result run(double ppm, int use_fb, int depth, double seconds, double drop
         }
         /* host: an IN URB completes (16 ms of feedback at once) */
         if (in_due >= 0 && t >= in_due) {
-            if (drop_in_at >= 0 && !dropped && t > drop_in_at * 8000) dropped = 1;   /* lost: never processed */
-            else for (int i = 0; i < IN_PKTS; i++) { uint8_t p[3] = { in_done[i], 0, 0 }; v7fb_packet(&R.fb, p, 3, 1); }
+            if (drop_in_at >= 0 && dropped < n_drops && t > (drop_in_at + dropped) * 8000) {
+                dropped++;                               /* lost: its 16 ms of feedback never arrives */
+                if (track_lost) for (int i = 0; i < IN_PKTS; i++) v7fb_packet(&R.fb, NULL, 0, 0);
+            } else for (int i = 0; i < IN_PKTS; i++) { uint8_t p[3] = { in_done[i], 0, 0 }; v7fb_packet(&R.fb, p, 3, 1); }
             in_due = -1;
         }
         /* host: OUT URBs complete -> lay out the next one at the end of the queue */
@@ -108,11 +113,11 @@ static result run(double ppm, int use_fb, int depth, double seconds, double drop
 
 int main(void) {
     printf("deck 195 ppm fast (as measured), OLD fixed 44.1 kHz pacing\n");
-    result a = run(195, 0, 8, 120, -1);
+    result a = run(195, 0, 8, 120, -1, 0, 1);
     CHECK(a.underflow > 0, "the deck's FIFO runs dry -- the simulation reproduces the screech (%d underflowing microframes)", a.underflow);
 
     printf("deck 195 ppm fast, feedback pacing, 10 minutes\n");
-    result b = run(195, 1, 8, 600, -1);
+    result b = run(195, 1, 8, 600, -1, 0, 1);
     CHECK(b.underflow == 0, "FIFO never runs dry (%d)", b.underflow);
     CHECK(b.fifo_max - b.fifo_min < 24, "FIFO level holds: %.0f..%.0f frames over 10 min", b.fifo_min, b.fifo_max);
     CHECK(b.fb.latches == 1, "latched once (%llu)", (unsigned long long)b.fb.latches);
@@ -121,18 +126,29 @@ int main(void) {
     CHECK(fabs(rate - 44108.6) < 1.0, "feedback reads the deck's real rate: %.1f frames/s", rate);
 
     printf("deck 300 ppm SLOW, feedback pacing (FIFO must not overflow either)\n");
-    result c = run(-300, 1, 8, 300, -1);
+    result c = run(-300, 1, 8, 300, -1, 0, 1);
     CHECK(c.underflow == 0 && c.fifo_max - c.fifo_min < 24, "FIFO level holds: %.0f..%.0f", c.fifo_min, c.fifo_max);
 
     printf("iso-OUT depth 16 (no-audio default) and 3 (low latency)\n");
-    result d = run(195, 1, 16, 120, -1);
+    result d = run(195, 1, 16, 120, -1, 0, 1);
     CHECK(d.underflow == 0 && d.fifo_max - d.fifo_min < 24, "depth 16: %.0f..%.0f", d.fifo_min, d.fifo_max);
-    result e = run(195, 1, 3, 120, -1);
+    result e = run(195, 1, 3, 120, -1, 0, 1);
     CHECK(e.underflow == 0 && e.fifo_max - e.fifo_min < 24, "depth 3: %.0f..%.0f", e.fifo_min, e.fifo_max);
 
     printf("one feedback URB (16 ms) lost at t=60 s\n");
-    result f = run(195, 1, 8, 300, 60);
+    result f = run(195, 1, 8, 300, 60, 1, 1);
     CHECK(f.underflow == 0 && f.fifo_max - f.fifo_min < 24, "FIFO still holds: %.0f..%.0f", f.fifo_min, f.fifo_max);
+
+    printf("five feedback URBs lost, one a second from t=60 s, 10 minutes\n");
+    result h = run(195, 1, 8, 600, 60, 5, 0);       /* skipped whole: wr falls 128 microframes behind each time */
+    CHECK(h.fb.misses > 5000,
+          "skipping lost URBs leaves the read lag broken -- the simulation sees it (%llu pacing misses, FIFO %.0f..%.0f)",
+          (unsigned long long)h.fb.misses, h.fifo_min, h.fifo_max);
+    result i = run(195, 1, 8, 600, 60, 5, 1);       /* accounted for: the read offset keeps tracking elapsed time */
+    CHECK(i.fb.misses < 1000 && i.fb.latches == 1,
+          "accounting for them keeps the lag: %llu misses, latched once (%llu)",
+          (unsigned long long)i.fb.misses, (unsigned long long)i.fb.latches);
+    CHECK(i.underflow == 0 && i.fifo_max - i.fifo_min < 24, "and the FIFO holds: %.0f..%.0f", i.fifo_min, i.fifo_max);
 
     printf("bad packets are ignored\n");
     v7fb g; v7fb_init(&g);

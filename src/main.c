@@ -835,13 +835,21 @@ static void LIBUSB_CALL isoin_cb(struct libusb_transfer *t) {
     g_isoin_cmpl++;
     /* This is the deck's FEEDBACK: one 3-byte packet per ms, byte 0 = frames it
        played in that ms. It paces iso-OUT (iso_pace -> v7fb_next). A transfer
-       that did not complete is skipped whole; the pacing re-latches if that
-       ever costs it its place (src/v7feedback.h). */
-    if (t->status == LIBUSB_TRANSFER_COMPLETED)
+       that did not complete still covered its milliseconds on the wire, so each
+       one is recorded as an unknown packet: that keeps the feedback write
+       position on the bus's clock. Skipping it would shift the fixed read lag
+       by 16 ms per loss until reads straddle the write head, and the pacing
+       would flip between feedback and nominal without ever re-latching
+       (src/v7feedback.h). */
+    if (t->status == LIBUSB_TRANSFER_COMPLETED) {
         for (int i = 0; i < t->num_iso_packets; i++)
             v7fb_packet(&g_fb, libusb_get_iso_packet_buffer_simple(t, (unsigned)i),
                         (int)t->iso_packet_desc[i].actual_length,
                         t->iso_packet_desc[i].status == LIBUSB_TRANSFER_COMPLETED);
+    } else {
+        for (int i = 0; i < t->num_iso_packets; i++)
+            v7fb_packet(&g_fb, NULL, 0, 0);
+    }
     /* --diag: show the raw feedback once, ~1 s in, so a deck that speaks a
        different format is diagnosable from one log line. */
     if (g_diag && g_isoin_cmpl == 62 && t->status == LIBUSB_TRANSFER_COMPLETED) {
