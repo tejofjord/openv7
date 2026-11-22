@@ -285,13 +285,14 @@ static void test_threads(void) {
        enough (~190 ms) for the ring to skip ahead (skips) or for the producer
        to hit a full ring and drop frames (overruns). On a shared CI runner that
        happens, so a gap is only a failure when the ring reports no such event.
-       Any gap beyond one per skip is still a failure. */
+       Each gap needs its own event: one per skip, and at least one dropped
+       frame per overrun-caused gap, so breaks <= skips + dropped frames. */
     uint64_t skips = g_tr->skips;
     uint64_t dropped = atomic_load_explicit(&g_tr->overruns, memory_order_relaxed);
     if (skips || dropped)
         printf("  note the test thread stalled (ring skipped %llu time(s), dropped %llu frame(s)); gaps are expected\n",
                (unsigned long long)skips, (unsigned long long)dropped);
-    CHECK(breaks == 0 || (dropped > 0 ? 1 : breaks <= (long)skips),
+    CHECK((uint64_t)breaks <= skips + dropped,
           "every frame arrives in order, or a recorded skip/overrun explains the gap (breaks=%ld, skips=%llu, overruns=%llu, underruns=%llu)",
           breaks, (unsigned long long)skips, (unsigned long long)dropped, (unsigned long long)g_tr->underruns);
     free(g_tr);
