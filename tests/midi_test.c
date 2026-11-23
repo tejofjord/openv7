@@ -318,6 +318,26 @@ int main(void) {
       i[k++]=0x00;
       expect("running status survives a frame", i,k, w,6); }
 
+        /* A SysEx split across the packets of one CoreMIDI list still reaches the
+       deck (CodeRabbit, #18); ordinary parsing stays packet-local. */
+    {   struct midi_split s = {0}; uint8_t o[3]; int ready = 0;
+        uint8_t p1[] = {0xF0,0x7E,0x7F,0x06}, p2[] = {0x01,0xF7};
+        dest_packet_begin(&s);
+        for (unsigned k = 0; k < sizeof p1; k++) midi_feed(&s, p1[k], o);
+        dest_packet_begin(&s);
+        for (unsigned k = 0; k < sizeof p2; k++) { midi_feed(&s, p2[k], o); if (s.sxready) ready = 1; }
+        uint8_t inq[] = {0xF0,0x7E,0x7F,0x06,0x01,0xF7};
+        int ok = ready && s.sxlen == 6 && !memcmp(s.sx, inq, 6) && is_device_inquiry(s.sx, s.sxlen);
+        if (!ok) fails++;
+        printf("  %s   SysEx inquiry split across two packets reaches the deck\n", ok ? "ok  " : "FAIL"); }
+    {   struct midi_split s = {0}; uint8_t o[3]; int n = 0;
+        uint8_t p1[] = {0x90,0x11}, p2[] = {0x7F};
+        dest_packet_begin(&s);
+        for (unsigned k = 0; k < sizeof p1; k++) n += midi_feed(&s, p1[k], o) > 0;
+        dest_packet_begin(&s);
+        for (unsigned k = 0; k < sizeof p2; k++) n += midi_feed(&s, p2[k], o) > 0;
+        if (n) fails++;
+        printf("  %s   a note-on split across packets is still dropped (parsing stays packet-local)\n", n ? "FAIL" : "ok  "); }
     printf(fails ? "\n%d FAILED\n" : "\nall passed\n", fails);
     return fails != 0;
 }

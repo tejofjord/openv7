@@ -544,11 +544,18 @@ static void batch_add(const uint8_t *msg, int len) {
 static void batch_flush(void) { if (g_pkt_n) MIDIReceived(g_source, g_pl); g_pkt_n = 0; }
 
 /* ---- CoreMIDI: receive from apps -> queue for the device ---- */
+/* A new CoreMIDI packet. Ordinary parsing is packet-local (a running status or
+   half a message never carries over), but a SysEx in progress does: CoreMIDI may
+   split one across packets of the same list, and a split device inquiry would
+   otherwise never reach the deck. */
+static void dest_packet_begin(struct midi_split *s) { if (!s->insysex) memset(s, 0, sizeof *s); }
 static void dest_read(const MIDIPacketList *pl, void *refCon, void *srcRefCon) {
     (void)refCon; (void)srcRefCon;
     const MIDIPacket *p = &pl->packet[0];
+    struct midi_split s = {0};
     for (unsigned i = 0; i < pl->numPackets; i++) {
-        struct midi_split s = {0}; uint8_t out[3];
+        uint8_t out[3];
+        dest_packet_begin(&s);
         for (unsigned j = 0; j < p->length; j++) {
             int n = midi_feed(&s, p->data[j], out);
             if (s.sxready) { s.sxready = 0; sysex_out(s.sx, s.sxlen); }
