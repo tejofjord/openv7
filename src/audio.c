@@ -8,6 +8,7 @@
 
 #include <CoreAudio/CoreAudio.h>
 #include <CoreFoundation/CoreFoundation.h>
+#include <dispatch/dispatch.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -185,6 +186,30 @@ static OSStatus ioproc(AudioObjectID inDevice, const AudioTimeStamp *inNow,
     return noErr;
 }
 
+/* The ring is built for the rate the device had when it was opened, and its
+   steering is clamped to +-0.1%. If the device is switched to another rate
+   while we record from it (Audio MIDI Setup, or another app), every buffer
+   after that is the wrong length for the ring: it would overflow or run dry
+   forever and the deck would play at the wrong speed. Stop feeding it instead,
+   which leaves the deck on silence, and say why. The stop is deferred off the
+   HAL's notification thread. */
+static void stop_for_rate_change(void *ctx) {
+    (void)ctx;
+    if (g_dev != kAudioObjectUnknown) AudioDeviceStop(g_dev, g_proc);
+}
+static OSStatus rate_listener(AudioObjectID dev, UInt32 n, const AudioObjectPropertyAddress *a, void *ctx) {
+    (void)n; (void)a; (void)ctx;
+    AudioObjectPropertyAddress ad = addr(kAudioDevicePropertyNominalSampleRate, kAudioObjectPropertyScopeGlobal);
+    Float64 now = 0; UInt32 sz = sizeof now;
+    if (AudioObjectGetPropertyData(dev, &ad, 0, NULL, &sz, &now) == noErr && fabs(now - g_src_rate) > 0.5) {
+        fprintf(stderr, "OpenV7: audio: \"%s\" changed from %.0f Hz to %.0f Hz while playing. "
+                        "Audio stopped (the deck is silent); restart the bridge to pick up the new rate.\n",
+                g_dev_name, g_src_rate, now);
+        dispatch_async_f(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), NULL, stop_for_rate_change);
+    }
+    return noErr;
+}
+
 /* Tell the HAL our IOProc uses none of the device's OUTPUT streams. Without
    this the bridge is also an (all-silent) output client of the loopback it is
    recording from. Best effort: failure only costs a little work. */
@@ -290,6 +315,8 @@ int audio_open_device(const char *want, int latency_ms, int buffer_frames, int u
     }
     g_dev = dev;
     g_mode = MODE_DEVICE;
+    {   AudioObjectPropertyAddress ra = addr(kAudioDevicePropertyNominalSampleRate, kAudioObjectPropertyScopeGlobal);
+        AudioObjectAddPropertyListener(dev, &ra, rate_listener, NULL); }   /* best effort */
     fprintf(stderr, "OpenV7: audio: playing \"%s\" (%u ch, %.0f Hz, %u-frame buffer) -> V7 outputs, "
                     "map %d,%d -> deck A, %d,%d -> deck B, ring ~%.1f ms.\n",
             g_dev_name, g_src_channels, g_src_rate, g_buf_frames,
@@ -337,6 +364,8 @@ void audio_diag(char *buf, size_t n) {
 
 void audio_close(void) {
     if (g_mode == MODE_DEVICE && g_dev != kAudioObjectUnknown) {
+        AudioObjectPropertyAddress ra = addr(kAudioDevicePropertyNominalSampleRate, kAudioObjectPropertyScopeGlobal);
+        AudioObjectRemovePropertyListener(g_dev, &ra, rate_listener, NULL);
         AudioDeviceStop(g_dev, g_proc);
         AudioDeviceDestroyIOProcID(g_dev, g_proc);
         g_dev = kAudioObjectUnknown;
