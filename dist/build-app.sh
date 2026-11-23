@@ -54,7 +54,7 @@ echo "==> building menu-bar app"
 clang -O2 -fobjc-arc -Wall -Wextra \
   -isysroot "$SDK" -mmacosx-version-min="$MACOS_MIN" \
   app/OpenV7App.m \
-  -framework Cocoa -framework ServiceManagement -framework CoreMIDI -framework IOKit \
+  -framework Cocoa -framework ServiceManagement -framework CoreMIDI -framework CoreAudio -framework IOKit \
   -o "$BUILD/OpenV7"
 
 echo "==> assembling app bundle"

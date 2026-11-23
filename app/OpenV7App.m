@@ -9,6 +9,7 @@
 
 #import <Cocoa/Cocoa.h>
 #import <CoreMIDI/CoreMIDI.h>
+#import <CoreAudio/CoreAudio.h>
 #import <ServiceManagement/ServiceManagement.h>
 #import <signal.h>
 #import <IOKit/IOKitLib.h>
@@ -879,6 +880,9 @@ static NSColor *HEX(int r,int g,int b,double a){ return [NSColor colorWithSRGBRe
    while the old one still holds the USB interfaces is the LIBUSB_ERROR_BUSY
    race the wait exists to prevent. The guard makes pumping safe. */
 @property (assign) BOOL stopping;
+/* Whether the "Numark V7" audio device existed when the running bridge started.
+   The bridge looks for it once, at startup; see audioDevicesChanged. */
+@property (assign) BOOL audioAtLaunch;
 /* When the current bridge process was launched, and how many times we have
    relaunched without it reaching a stable state. Both feed -refresh; see the
    comment there for why "the process exists" is not a usable answer. */
@@ -962,6 +966,35 @@ static void MIDIReadCB(const MIDIPacketList *pl, void *a, void *b) {
    and a bundle whose Info.plist only root can read is skipped without a single
    log line (found 2026-11-21: a checkout with 600 modes, copied with cp -R). */
 static NSString *const kV7Driver = @"/Library/Audio/Plug-Ins/HAL/NumarkV7.driver";
+
+/* Is a CoreAudio device with this UID, or else this name, present with at least
+   one input stream? The same two lookups, in the same order, the bridge makes
+   when it opens "Numark V7" (src/audio.c find_device). */
+static BOOL audioDevicePresent(NSString *uid, NSString *name){
+    AudioObjectPropertyAddress a={kAudioHardwarePropertyTranslateUIDToDevice,kAudioObjectPropertyScopeGlobal,kAudioObjectPropertyElementMain};
+    CFStringRef u=(__bridge CFStringRef)uid; AudioObjectID dev=kAudioObjectUnknown; UInt32 sz=sizeof dev;
+    if(AudioObjectGetPropertyData(kAudioObjectSystemObject,&a,sizeof u,&u,&sz,&dev)==noErr && dev!=kAudioObjectUnknown){
+        AudioObjectPropertyAddress in={kAudioDevicePropertyStreams,kAudioObjectPropertyScopeInput,kAudioObjectPropertyElementMain};
+        UInt32 n=0; if(AudioObjectGetPropertyDataSize(dev,&in,0,NULL,&n)==noErr && n>0) return YES;
+    }
+    a.mSelector=kAudioHardwarePropertyDevices;
+    if(AudioObjectGetPropertyDataSize(kAudioObjectSystemObject,&a,0,NULL,&sz)!=noErr || !sz) return NO;
+    AudioObjectID *ids=malloc(sz); if(!ids) return NO;
+    BOOL found=NO;
+    if(AudioObjectGetPropertyData(kAudioObjectSystemObject,&a,0,NULL,&sz,ids)==noErr){
+        for(UInt32 i=0;i<sz/sizeof *ids && !found;i++){
+            AudioObjectPropertyAddress pn={kAudioObjectPropertyName,kAudioObjectPropertyScopeGlobal,kAudioObjectPropertyElementMain};
+            CFStringRef nm=NULL; UInt32 ns=sizeof nm;
+            if(AudioObjectGetPropertyData(ids[i],&pn,0,NULL,&ns,&nm)!=noErr || !nm) continue;
+            BOOL same=[(__bridge NSString*)nm isEqualToString:name]; CFRelease(nm);
+            AudioObjectPropertyAddress in={kAudioDevicePropertyStreams,kAudioObjectPropertyScopeInput,kAudioObjectPropertyElementMain};
+            UInt32 n=0;
+            if(same && AudioObjectGetPropertyDataSize(ids[i],&in,0,NULL,&n)==noErr && n>0) found=YES;
+        }
+    }
+    free(ids); return found;
+}
+static BOOL v7AudioDevicePresent(void){ return audioDevicePresent(@"com.openv7.audio.NumarkV7", @"Numark V7"); }
 static NSString *shq(NSString *s) {                 /* single-quote for /bin/sh */
     return [NSString stringWithFormat:@"'%@'", [s stringByReplacingOccurrencesOfString:@"'" withString:@"'\\''"]];
 }
@@ -1001,6 +1034,7 @@ static NSArray *latencyArgs(void) {
 - (void)startBridge {
     if(_stopping || [self bridgeRunning]) return;   /* never relaunch into a teardown */
     NSString *path=[self bridgePath]; if(!path) return;
+    self.audioAtLaunch=v7AudioDevicePresent();       /* what this bridge will find */
     NSTask *t=[NSTask new]; t.executableURL=[NSURL fileURLWithPath:path];
     /* --supervised: if this app is force-quit or crashes, applicationWillTerminate
        never runs and the bridge is orphaned while still holding both USB
@@ -1475,7 +1509,24 @@ static NSArray *latencyArgs(void) {
     }
     /* Core Audio takes a few seconds to come back with the device; then restart
        the bridge so it opens (or lets go of) it. */
-    [self performSelector:@selector(restart:) withObject:nil afterDelay:4.0];
+    if(inst) [self performSelector:@selector(restart:) withObject:nil afterDelay:4.0];   /* removed: let go of it */
+    else {   /* installed: restart when Core Audio reports the device, not after a guess */
+        [self performSelector:@selector(audioDevicesChanged) withObject:nil afterDelay:10.0];
+        [self performSelector:@selector(audioDevicesChanged) withObject:nil afterDelay:30.0];   /* slow coreaudiod */
+    }
+}
+/* The bridge opens the "Numark V7" audio device once, at startup. At login the
+   app can start it before coreaudiod has loaded the plug-in, and a fresh install
+   takes Core Audio a variable time to restart, so a bridge started without the
+   device would stay silent until someone restarted it by hand. When the device
+   list changes and the device is there now but was not when this bridge
+   started, restart it once so it picks the device up. Control keeps working
+   throughout; the restart is the one the install flow used to time with a
+   fixed delay. */
+- (void)audioDevicesChanged {
+    if(self.audioAtLaunch || ![self bridgeRunning] || self.stopping || !v7AudioDevicePresent()) return;
+    self.audioAtLaunch=YES;                            /* once: startBridge re-reads it */
+    [self performSelector:@selector(restart:) withObject:nil afterDelay:1.0];
 }
 - (void)toggleLogin:(id)s { (void)s;
     if(@available(macOS 13.0,*)){ NSError *e=nil; SMAppService *svc=SMAppService.mainAppService;
@@ -1497,6 +1548,9 @@ static NSArray *latencyArgs(void) {
     self.activityToken = [[NSProcessInfo processInfo]
         beginActivityWithOptions:NSActivityUserInitiated|NSActivityLatencyCritical
         reason:@"Streaming from the Numark V7"];
+    {   AudioObjectPropertyAddress da={kAudioHardwarePropertyDevices,kAudioObjectPropertyScopeGlobal,kAudioObjectPropertyElementMain};
+        AudioObjectAddPropertyListenerBlock(kAudioObjectSystemObject,&da,dispatch_get_main_queue(),
+            ^(UInt32 n,const AudioObjectPropertyAddress *a){ (void)n; (void)a; [self audioDevicesChanged]; }); }
     _item=[[NSStatusBar systemStatusBar] statusItemWithLength:NSVariableStatusItemLength];
     _item.button.title=@"○ V7";
     NSMenu *m=[NSMenu new];

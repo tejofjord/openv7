@@ -37,6 +37,7 @@ typedef struct {
    which the first of n_drops IN URBs is lost (<0 = never), one more every second
    after. track_lost: what isoin_cb does with a lost URB -- 1 = account for its
    16 ms (v7fb_packet with no data, as src/main.c now does), 0 = skip it whole. */
+static double g_drop_gap = 1.0;      /* seconds between lost URBs; 0.016 = back to back */
 static result run(double ppm, int use_fb, int depth, double seconds, double drop_in_at,
                   int n_drops, int track_lost) {
     result R = { 1e9, -1e9, 0, 0, 0, {{0}, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0} };
@@ -88,7 +89,7 @@ static result run(double ppm, int use_fb, int depth, double seconds, double drop
         }
         /* host: an IN URB completes (16 ms of feedback at once) */
         if (in_due >= 0 && t >= in_due) {
-            if (drop_in_at >= 0 && dropped < n_drops && t > (drop_in_at + dropped) * 8000) {
+            if (drop_in_at >= 0 && dropped < n_drops && t > (drop_in_at + dropped * g_drop_gap) * 8000) {
                 dropped++;                               /* lost: its 16 ms of feedback never arrives */
                 if (track_lost) for (int i = 0; i < IN_PKTS; i++) v7fb_packet(&R.fb, NULL, 0, 0);
             } else for (int i = 0; i < IN_PKTS; i++) { uint8_t p[3] = { in_done[i], 0, 0 }; v7fb_packet(&R.fb, p, 3, 1); }
@@ -149,6 +150,17 @@ int main(void) {
           "accounting for them keeps the lag: %llu misses, latched once (%llu)",
           (unsigned long long)i.fb.misses, (unsigned long long)i.fb.latches);
     CHECK(i.underflow == 0 && i.fifo_max - i.fifo_min < 24, "and the FIFO holds: %.0f..%.0f", i.fifo_min, i.fifo_max);
+
+    printf("eight feedback URBs lost back to back (128 ms) at t=60 s, 10 minutes\n");
+    g_drop_gap = 0.016;
+    result j = run(195, 1, 8, 600, 60, 8, 0);
+    result k = run(195, 1, 8, 600, 60, 8, 1);
+    g_drop_gap = 1.0;
+    CHECK(j.fb.misses > 1000, "skipping them leaves the lag broken (%llu pacing misses, %llu latches)",
+          (unsigned long long)j.fb.misses, (unsigned long long)j.fb.latches);
+    CHECK(k.fb.misses < 1000 && k.fb.latches == 1 && k.underflow == 0 && k.fifo_max - k.fifo_min < 24,
+          "accounting for them keeps it: %llu misses, latched once (%llu), FIFO %.0f..%.0f",
+          (unsigned long long)k.fb.misses, (unsigned long long)k.fb.latches, k.fifo_min, k.fifo_max);
 
     printf("bad packets are ignored\n");
     v7fb g; v7fb_init(&g);
