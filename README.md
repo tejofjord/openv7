@@ -20,7 +20,7 @@ No kernel extension. No system modification. Just a program you run.
             ◄──(motor, LEDs)───          ◄──                       ◄──
 ```
 
-## Status — v1
+## Status — v1.1
 
 | Platform | State |
 |----------|-------|
@@ -32,7 +32,8 @@ No kernel extension. No system modification. Just a program you run.
 |------------|-------|
 | Control **input** (jog, buttons, faders → MIDI) | ✅ working |
 | Control **output** (LEDs, **motor** → device) | ✅ working (motor spins on command) |
-| **Audio** (the V7's built-in soundcard) | ⏳ not implemented — but the wire format is now known, see below |
+| **Audio** (the V7's built-in soundcard) | ✅ all four channels clean on hardware (feedback-paced clock); 🔬 the "Numark V7" CoreAudio device awaits a full DJ-app session — [docs/AUDIO.md](docs/AUDIO.md) |
+| **Strip search** in VirtualDJ | ✅ lands where the finger was, start to end (since 1.1.0) — [docs/CONTROL-MAP.md](docs/CONTROL-MAP.md) |
 | **Motor** command set (start/stop/brake/RPM/**reverse**/ramp/pitch-trim) | ✅ measured on hardware — [docs/PROTOCOL.md](docs/PROTOCOL.md) |
 | Full per-control map (buttons, pads, faders, LEDs) | ✅ mapped, 🔬 hardware confirmation pending — [docs/CONTROL-MAP.md](docs/CONTROL-MAP.md) |
 
@@ -53,16 +54,33 @@ hardware (✅) or mapped from a corroborating source and flagged as unconfirmed
 | Idle keepalive behaviour | ✅ measured — **there is none** |
 | Recovery sequence | ✅ measured — abort pipes + `SET_CONFIGURATION` |
 | Audio **output** encoding | ✅ decoded — plain 24-bit LE, **no codec needed** |
+| Output **rate feedback** (iso IN `0x81`, frames played per ms) | 🔬 from Ozzy + the vendor driver's strings; used for pacing |
 | Audio **input** frame layout | 🔬 mapped (bit-scatter, 1 bit/byte) |
 | 89 control inputs / ~60 LED outputs | 🔬 mapped |
 
-> **v1 is control-only.** The V7's motor, jog, and buttons work in your DJ app;
-> for sound, point the app's audio output at your Mac's built-in output or any
-> other interface. Native V7 audio is [on the roadmap](docs/ROADMAP.md).
+> **Audio is new.** Control (motor, jog, buttons, strip) is the proven part.
+> To use the V7's own outputs, choose **Install Audio Device…** from the V7
+> menu-bar icon (or `./install.sh --audio-driver` from source) and pick
+> **Numark V7** as your DJ app's output — see [docs/AUDIO.md](docs/AUDIO.md),
+> which starts with a one-command tone test. Otherwise point the app at any
+> other interface, as in v1.
+
+### What's new in 1.1.0
+
+- **The V7's own audio outputs work** — four channels (deck A 1-2, deck B 3-4)
+  through a "Numark V7" sound device, paced by the deck's own rate feedback so
+  there is no periodic crackle. The DMG carries the device; install it from the
+  menu-bar icon.
+- **Strip search behaves like Windows** — no jump to before the track on
+  release, deck select or load; the far left is the start and the far right
+  stays inside the track in VirtualDJ. If your strip ends are off, run the
+  Numark calibration (menu ▸ **Calibration…**).
+- `--strip-raw` and `--strip-out LO,HI` for other DJ apps (Serato, Mixxx:
+  `--strip-out 1,127`).
 
 ## Install — the easy way (no Terminal)
 
-1. Download **OpenV7.dmg** from the [Releases](../../releases) page.
+1. Download **OpenV7-1.1.0.dmg** from the [Releases](../../releases) page.
 2. Open it and drag **OpenV7** into **Applications**.
 3. Double-click **OpenV7**. The build isn't notarized, so macOS blocks the first
    launch. Approve it once in **System Settings** ▸ **Privacy & Security** ▸
@@ -72,6 +90,9 @@ hardware (✅) or mapped from a corroborating source and flagged as unconfirmed
    the only way.)*
 4. A **◉ V7** icon appears in the menu bar. Plug in the V7 — it shows *connected*.
 5. Optional: menu ▸ **Open at Login** to start it automatically every boot.
+6. Optional: menu ▸ **Install Audio Device…** to play through the V7's own
+   outputs (asks for your password; macOS then asks once about the
+   microphone — say yes, that is the V7 device, nothing is recorded).
 
 No Homebrew, no Terminal, no kernel driver. `libusb` is bundled inside the app.
 Now open your DJ app and pick **Numark V7** as a MIDI controller.
@@ -85,6 +106,18 @@ press any control and it lights up, use **Learn mode** to map controls (then
 buttons, watch the raw MIDI log, and follow the **Calibration** walkthrough.
 
 ---
+
+## Install — from source, one command
+
+```sh
+./install.sh                  # checks the toolchain, builds, tests, installs OpenV7.app
+./install.sh --audio-driver   # ...plus the "Numark V7" audio device (asks for your password)
+```
+
+It needs the Xcode Command Line Tools and Homebrew (for `libusb`, build-time
+only), tells you if either is missing, and logs everything to
+`build/install.log`. A locally built app is not quarantined, so there is no
+Gatekeeper prompt.
 
 ## Install — for technical users (Terminal)
 
@@ -100,6 +133,7 @@ brew install libusb
 make                 # -> ./openv7   (the CLI bridge)
 sudo make install    # optional: install openv7 to /usr/local/bin
 make app             # optional: build build/OpenV7.app + OpenV7.dmg yourself
+./dist/release.sh    # optional: tests + DMG + source zip in build/release/
 ```
 
 Run it (plug in and power on the V7 first):
@@ -175,6 +209,7 @@ The V7 exposes two vendor-specific USB interfaces. OpenV7:
 |---|---|
 | [docs/PROTOCOL.md](docs/PROTOCOL.md) | USB identity, endpoints, init handshake, platter reporting, the full motor command set, SysEx device identity |
 | [docs/CONTROL-MAP.md](docs/CONTROL-MAP.md) | Every control in and every LED/motor command out, with per-row confidence |
+| [docs/AUDIO.md](docs/AUDIO.md) | Native audio: the tone test, the "Numark V7" CoreAudio device, latency, clock-drift correction |
 | [docs/AUDIO-CODEC.md](docs/AUDIO-CODEC.md) | The Ploytec bit-interleaved format, packet framing, and why MIDI lives inside the audio packets |
 | [docs/VENDOR-DRIVER.md](docs/VENDOR-DRIVER.md) | Static analysis of the stock Windows driver — the keepalive and recovery mechanisms |
 | [docs/HARDWARE.md](docs/HARDWARE.md) | The boards inside the deck, the platter's encoder path, and where the clocks come from |

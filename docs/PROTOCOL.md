@@ -22,10 +22,22 @@ Legend: ✅ verified on hardware · 🔬 documented, needs on-device confirmatio
 | IF0 alt1 | `0x02` | isochronous | OUT | audio playback (also the clock) — 156 B/packet |
 | IF0 alt1 | `0x83` | bulk | IN  | control / MIDI from device |
 | IF0 alt1 | `0x04` | bulk | OUT | control / MIDI to device (LEDs, motor) |
-| IF1 alt1 | `0x81` | isochronous | IN  | audio return — near-empty (3 kB/s), but must be drained |
+| IF1 alt1 | `0x81` | isochronous | IN  | **rate feedback** — one 3-byte packet per 1 ms, byte 0 = frames the deck played in it (44/45). 3 kB/s. 🔬 See below |
 | IF1 alt1 | `0x86` | bulk | IN  | audio return / high-rate (drained) |
 
 Both interfaces have a zero-bandwidth `alt0`; select `alt1` to stream.
+
+> **`0x81` is the output's clock feedback, not an audio return.** The deck plays
+> from its own 11.2896 MHz crystal, which runs ~195 ppm fast against the host
+> (the platter timestamp clock measured +153/+179 ppm; the stock driver sends
+> +195 ppm more than a nominal 44.1 kHz). Feeding iso-OUT at a fixed 44.1 kHz
+> starves it: its FIFO runs dry roughly every 20 s, audible on the outputs as a
+> ~2 s burst of noise. The stock driver paces from this endpoint
+> (`FEEDBACK FramePattern Locked`, `isocReadCompleteFeedback` in `v7_usb.sys`),
+> and the [Ozzy](https://github.com/mischa85/Ozzy) project documents the format
+> for this Ploytec family: 3-byte packets, byte 0 = frames played in the 1 ms
+> interval. OpenV7 now does the same (`src/v7feedback.h`). 🔬 The format is
+> Ozzy's; `openv7 --diag` prints the deck's raw packets ~1 s in to confirm it.
 
 > **On the "input" — the endpoint is probably vestigial.** The Windows vendor
 > driver registers `KSCATEGORY_CAPTURE` and Windows enumerates a
@@ -399,6 +411,21 @@ the audio packet layout), and what still has to be measured on a V7.
 Note the "no inputs" claim in earlier revisions of this file was wrong — the
 vendor driver exposes a capture endpoint. Channel count for the V7 specifically
 is not established; the Ploytec codec core is 8-channel.
+
+## ✅ The 42nd byte is not MIDI — it carries audio while audio plays
+
+Every inbound frame on `0x83` is 42 bytes, and the last one was taken for a
+`0x00` terminator. It is `0x00` only while the iso-OUT stream is silent. With
+audio playing it carries a byte of the **audio** — the high byte of an output
+sample: a −18 dBFS test tone put `0x00`–`0x0F` and `0xF0`–`0xFF` there in a
+sine's distribution, in all 74,408 frames of `build/raw-K.txt` (2026-11-21).
+
+Parsed as MIDI those bytes become `F1`–`F6`, `Dx` and `Ex` "messages", and —
+as orphan data bytes under running status — real-looking ones: deck B pitch,
+strip search, buttons, about 90 a second on whichever platter is turning. That
+was the "deck B jerks once VirtualDJ plays through the V7". OpenV7 drops the
+byte by **position** (`in_frame_trailer`, `src/main.c`), never by value:
+replayed, garbage fell from 7,785 messages to 0 and position jumps from 959 to 1.
 
 ## ✅ Frame framing — MIDI messages span 42-byte frames
 

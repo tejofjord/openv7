@@ -1,6 +1,6 @@
 # OpenV7 — Numark V7 userspace driver (Apple-Silicon macOS)
 BIN      := openv7
-SRC      := src/main.c src/nonap.m
+SRC      := src/main.c src/nonap.m src/audio.c src/v7ring.c
 PREFIX   ?= /usr/local
 
 CC       ?= clang
@@ -32,9 +32,9 @@ CFLAGS   += $(shell pkg-config --cflags libusb-1.0)
 # silence the warnings for v1.
 CFLAGS   += -Wno-deprecated-declarations
 LDFLAGS  += $(shell pkg-config --libs libusb-1.0)
-LDFLAGS  += -framework CoreMIDI -framework CoreFoundation -framework Foundation
+LDFLAGS  += -framework CoreMIDI -framework CoreAudio -framework CoreFoundation -framework Foundation
 
-.PHONY: all clean install uninstall app test corpus
+.PHONY: all clean install uninstall app test corpus audiotest feedbacktest driver drivertest
 
 # Delete a target whose recipe failed. Without this, a binary rejected by the
 # stamp check stays on disk newer than its sources, so the very next `make
@@ -43,7 +43,7 @@ LDFLAGS  += -framework CoreMIDI -framework CoreFoundation -framework Foundation
 
 all: $(BIN)
 
-$(BIN): $(SRC) src/ploytec.h
+$(BIN): $(SRC) src/ploytec.h src/audio.h src/v7ring.h src/v7feedback.h
 	$(CC) $(CFLAGS) $(SRC) -o $(BIN) $(LDFLAGS)
 	@# Check the ARTIFACT, not the inputs. SDKROOT can arrive from the environment
 	@# (xcrun exports one) or from a command-line `make SDKROOT=...`, which outranks
@@ -60,15 +60,37 @@ app:
 # Unit tests. tests/midi_test.c includes src/main.c directly (main() renamed) so
 # it can reach the static MIDI splitter.
 test: | build
-	$(CC) $(CFLAGS) tests/midi_test.c src/nonap.m -o build/midi_test $(LDFLAGS)
+	$(CC) $(CFLAGS) tests/midi_test.c src/nonap.m src/audio.c src/v7ring.c -o build/midi_test $(LDFLAGS)
 	./build/midi_test
 
 # Grades the splitter against 12,161 real frames captured from the STOCK vendor
 # driver (captures/usb/). Hand-written vectors cannot catch a wrong assumption
 # about what the device emits; this corpus can, because it IS what it emits.
 corpus: | build
-	$(CC) $(CFLAGS) tests/corpus_test.c src/nonap.m -o build/corpus_test $(LDFLAGS)
+	$(CC) $(CFLAGS) tests/corpus_test.c src/nonap.m src/audio.c src/v7ring.c -o build/corpus_test $(LDFLAGS)
 	./build/corpus_test
+
+# The audio ring / drift-corrected resampler. Portable: no device, no CoreAudio.
+audiotest: | build
+	$(CC) -O2 -std=c11 -Wall -Wextra tests/audio_test.c src/v7ring.c -o build/audio_test -lm -lpthread
+	./build/audio_test
+
+# Feedback-paced iso-OUT (src/v7feedback.h) against a simulated deck whose
+# crystal runs fast, microframe by microframe. Portable.
+feedbacktest: | build
+	$(CC) -O2 -std=c11 -Wall -Wextra tests/feedback_test.c -o build/feedback_test -lm
+	./build/feedback_test
+
+# The "Numark V7" CoreAudio plug-in (driver/). `make driver` builds
+# build/NumarkV7.driver; ./install.sh --audio-driver installs it.
+driver:
+	./driver/build-driver.sh
+
+# Drives the plug-in through its own HAL interface table, in-process.
+drivertest: | build
+	$(CC) -O1 -std=c11 -Wall -Wextra -isysroot $(SDKROOT) tests/driver_test.c -o build/driver_test \
+	  -framework CoreAudio -framework CoreFoundation
+	./build/driver_test
 
 clean:
 	rm -f $(BIN)

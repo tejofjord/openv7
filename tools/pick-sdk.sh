@@ -20,7 +20,8 @@
 #   SDKROOT=/path/to.sdk make    # override (still checked by the build's guard)
 set -euo pipefail
 
-MACOS_SDK_MAX=26
+# 27: macOS 27 shipped publicly on 14 Sep 2026, so its SDK is no longer a seed.
+MACOS_SDK_MAX=27
 
 sdk_version() { /usr/libexec/PlistBuddy -c 'Print :Version' "$1/SDKSettings.plist" 2>/dev/null; }
 
