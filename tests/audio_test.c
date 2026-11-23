@@ -281,20 +281,19 @@ static void test_threads(void) {
     atomic_store_explicit(&g_tdone, 1, memory_order_relaxed); pthread_join(th, NULL);
     CHECK(frames > 44100, "streamed %ld frames", frames);
     CHECK(torn == 0, "no torn frames (%ld)", torn);
-    /* A gap is legitimate exactly when the consumer thread was descheduled long
-       enough (~190 ms) for the ring to skip ahead (skips) or for the producer
-       to hit a full ring and drop frames (overruns). On a shared CI runner that
-       happens, so a gap is only a failure when the ring reports no such event.
-       Each gap needs its own event: one per skip, and at least one dropped
-       frame per overrun-caused gap, so breaks <= skips + dropped frames. */
+    /* A gap is legitimate only when the consumer thread was descheduled long
+       enough (~190 ms) for the ring to skip ahead to catch up, which it counts
+       in skips. An overrun cannot make one: v7r_write rejects the frames it has
+       no room for and the producer re-offers exactly those, in order. So each
+       gap needs its own skip, and anything beyond that is a real ordering or
+       memory-ordering fault. Overruns are reported but not allowed for. */
     uint64_t skips = g_tr->skips;
-    uint64_t dropped = atomic_load_explicit(&g_tr->overruns, memory_order_relaxed);
-    if (skips || dropped)
-        printf("  note the test thread stalled (ring skipped %llu time(s), dropped %llu frame(s)); gaps are expected\n",
-               (unsigned long long)skips, (unsigned long long)dropped);
-    CHECK((uint64_t)breaks <= skips + dropped,
-          "every frame arrives in order, or a recorded skip/overrun explains the gap (breaks=%ld, skips=%llu, overruns=%llu, underruns=%llu)",
-          breaks, (unsigned long long)skips, (unsigned long long)dropped, (unsigned long long)g_tr->underruns);
+    uint64_t overran = atomic_load_explicit(&g_tr->overruns, memory_order_relaxed);
+    if (skips)
+        printf("  note the test thread stalled (ring skipped %llu time(s)); gaps are expected\n", (unsigned long long)skips);
+    CHECK((uint64_t)breaks <= skips,
+          "every frame arrives in order, or a recorded skip explains the gap (breaks=%ld, skips=%llu, overruns=%llu, underruns=%llu)",
+          breaks, (unsigned long long)skips, (unsigned long long)overran, (unsigned long long)g_tr->underruns);
     free(g_tr);
 }
 
