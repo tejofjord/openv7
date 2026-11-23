@@ -106,7 +106,7 @@ static void render(v7ring *r, float *out, int n) {
     if (!r->running) {
         /* Prime: wait for target + the kernel's look-ahead, then start exactly
            `target` behind the write head with a whole-sample phase. */
-        if (w - r->rpos >= (uint64_t)(r->target + V7R_HALF) && w >= (uint64_t)(r->target + V7R_HALF)) {
+        if ((int64_t)(w - r->rpos) >= (int64_t)(r->target + V7R_HALF) && w >= (uint64_t)(r->target + V7R_HALF)) {
             r->rpos = w - (uint64_t)r->target;
             r->frac = 0.0;
             r->adj = 0.0;
@@ -155,7 +155,12 @@ static void render(v7ring *r, float *out, int n) {
     const double ratio = r->base_ratio * (1.0 + adj);
 
     for (; i < n; i++) {
-        if (w - r->rpos < (uint64_t)(V7R_HALF + 1)) {         /* not enough look-ahead */
+        /* Signed: a read position ahead of the write head must count as no
+           look-ahead, not wrap to a huge unsigned distance and read stale
+           ring contents. Nothing in the bridge moves rpos past w today (the
+           ring is initialised once, before the IOProc starts), so this is
+           defence in depth for a future re-init or resync. */
+        if ((int64_t)(w - r->rpos) < (int64_t)(V7R_HALF + 1)) {   /* not enough look-ahead */
             memset(&out[i * V7R_CH], 0, sizeof(float) * V7R_CH * (size_t)(n - i));
             r->running = 0;
             r->underruns++;

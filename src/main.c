@@ -811,6 +811,11 @@ static void arm_bulk(struct libusb_transfer *t, int *live, unsigned char ep,
 /* iso rings, kept addressable so the main loop can re-arm them (see arm_iso) */
 static struct libusb_transfer *g_iso_out[ISO_NXFER], *g_iso_in[ISO_NXFER];
 static int g_iso_out_live[ISO_NXFER], g_iso_in_live[ISO_NXFER];
+/* An iso-OUT transfer whose lengths and PCM are already laid out but whose
+   submit has not succeeded. The watchdog re-calls arm_iso for it every pass;
+   pacing again would burn another block of feedback slots and of audio per
+   retry, so a prepared block is submitted as it is. */
+static int g_iso_out_paced[ISO_NXFER];
 static void arm_iso(struct libusb_transfer *t, int *live, int pace, const char *name, time_t *gripe);
 
 /* ---- streaming-health counters (for the --diag rate report) ---- */
@@ -1226,6 +1231,15 @@ static void LIBUSB_CALL ctrl_in_cb(struct libusb_transfer *t) {
             fputc('\n', g_raw_in);
         }
         g_ctrl_bytes += t->actual_length;
+        /* The frame trailer is dropped by position, which assumes a transfer is
+           whole 42-byte frames (a short packet ends a bulk transfer, and every
+           captured frame was whole: docs/PROTOCOL.md). If that ever stops
+           holding the trailer would reach the MIDI parser again, so say so once. */
+        static int warned_frame_len;
+        if (t->actual_length % V7_IN_FRAME_LEN && !warned_frame_len++)
+            fprintf(stderr, "OpenV7: control-IN transfer of %d bytes is not whole 42-byte frames; "
+                            "the audio byte in the frame trailer cannot be dropped by position for it.\n",
+                    t->actual_length);
         if (t->actual_length > 0) g_last_data_ms = now_ms();   /* the pipe is genuinely alive */
         uint8_t out[3];
         if (g_batch_frame) batch_begin();
@@ -1293,9 +1307,13 @@ static void arm_bulk(struct libusb_transfer *t, int *live, unsigned char ep,
    self-healing instead of silently draining. */
 static void arm_iso(struct libusb_transfer *t, int *live, int pace, const char *name, time_t *gripe) {
     if (g_quit || !t || *live) return;
-    if (pace) iso_pace(t);              /* lengths carry the rate; re-pace every submit */
+    int pidx = pace ? (int)(intptr_t)t->user_data : 0;
+    if (pace && !g_iso_out_paced[pidx]) {   /* lengths carry the rate; re-pace every submit... */
+        iso_pace(t);
+        g_iso_out_paced[pidx] = 1;          /* ...but only once per block: a failed submit keeps it */
+    }
     int r = libusb_submit_transfer(t);
-    if (r == 0) { *live = 1; return; }
+    if (r == 0) { *live = 1; if (pace) g_iso_out_paced[pidx] = 0; return; }
     if (usb_gone(r)) { usb_lost(r, name); return; }
     time_t now = time(NULL);
     if (now != *gripe) {

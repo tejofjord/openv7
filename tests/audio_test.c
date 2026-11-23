@@ -298,6 +298,26 @@ static void test_threads(void) {
     free(g_tr);
 }
 
+/* ---- 8. a read position ahead of the write head is an underrun, not a wrap ---- */
+static void test_ahead(void) {
+    printf("read position ahead of the write head\n");
+    v7ring *r = calloc(1, sizeof *r);
+    v7r_init(r, 44100, 44100, 2048);
+    float buf[256 * V7R_CH];
+    for (int i = 0; i < 256 * V7R_CH; i++) buf[i] = 1.0f;
+    for (int k = 0; k < 20; k++) v7r_write(r, buf, 256);          /* 5120 frames of DC 1.0 */
+    float out[64 * V7R_CH];
+    v7r_read_f32(r, out, 64);                                      /* primes and plays */
+    CHECK(r->running && out[10 * V7R_CH] > 0.9f, "primed and playing");
+    uint64_t u0 = r->underruns;
+    r->rpos = atomic_load(&r->wpos) + 500;                         /* force the impossible */
+    v7r_read_f32(r, out, 64);
+    int silent = 1; for (int i = 0; i < 64 * V7R_CH; i++) if (out[i] != 0.0f) silent = 0;
+    CHECK(silent, "silence, not stale ring contents");
+    CHECK(r->underruns == u0 + 1 && !r->running, "counted as one underrun and stopped (%llu)", (unsigned long long)(r->underruns - u0));
+    free(r);
+}
+
 int main(void) {
     test_pack();
     test_kernel();
@@ -311,6 +331,7 @@ int main(void) {
     test_48k();
     test_gap();
     test_threads();
+    test_ahead();
     printf(fails ? "\n%d FAILED\n" : "\nall audio tests passed\n", fails);
     return fails ? 1 : 0;
 }
