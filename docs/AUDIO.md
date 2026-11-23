@@ -95,7 +95,7 @@ Under the menu, four queues add up; all are tunable from the command line:
 
 | Stage | Default | Low-latency example | Flag |
 |---|---|---|---|
-| iso-OUT queue to the deck | 8 URBs × 40 packets = 40 ms | 4 × 8 = 4 ms | `--iso-urb PACKETS` (8-40), `--iso-depth N` (2-16) |
+| iso-OUT queue to the deck | 8 URBs × 40 packets = 40 ms | 6 × 8 = 6 ms | `--iso-urb PACKETS` (8, 16, 24, 32, 40), `--iso-depth N` (2-16) |
 | ring kept ahead of the reader | 12 ms + one IO buffer + one URB | 2 ms + 64 + 48 frames | `--audio-latency MS` |
 | the bridge's CoreAudio IO buffer | 256 frames | 64 | `--audio-buffer FRAMES` |
 | the loopback itself | about two of the DJ app's IO buffers | 2 × 64 | the app's buffer size |
@@ -186,7 +186,15 @@ Control keeps working; the bridge just logs that the device is missing.
 - ✅ The tone test above, both decks.
 - The tone test after the feedback fix: minutes without a burst.
 - No long-idle stall with real audio flowing at iso depth 8.
-- How low `--iso-depth` can go.
+- How low `--iso-depth` can go. Reading libusb 1.0.29's Darwin backend
+  (`darwin_usb.c`): a resubmit starts at `max(bus frame + 4, end of the previous
+  transfer)`, and the next start advances by `packets / 8` frames in integer
+  arithmetic. So `--iso-urb` must be a multiple of 8, and `(depth - 1) x
+  packets / 8` must stay at 4 ms or more or every resubmit leaves a gap; the
+  bridge refuses the first and warns on the second. This comes from reading the
+  source, not a hardware sweep: `tools/latency-sweep.sh` still has to confirm
+  where a real V7 starts to crackle, and its `8:4`, `8:3`, `8:2` steps are
+  expected to be below the floor.
 - Whether macOS loads an ad-hoc-signed HAL plug-in on every version in use. If
   it does not, `DEVELOPER_ID="Developer ID Application: …" ./install.sh --audio-driver`
   signs it properly.

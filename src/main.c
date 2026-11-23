@@ -197,6 +197,12 @@ static int g_iso_out_nxfer = ISO_NXFER;
    before it followed the deck's feedback, so shallow queues are re-measured
    with tools/latency-sweep.sh rather than ruled out. */
 static int g_iso_out_npkt = ISO_NPKT_OUT;
+/* Milliseconds still queued when an iso-OUT transfer completes: the other
+   (depth - 1) URBs. libusb's Darwin backend starts a resubmit at
+   max(bus frame + 4, end of the previous transfer), so under 4 ms here means a
+   gap on every resubmit. */
+#define ISO_MIN_QUEUED_MS 4.0
+static double iso_queued_after_completion_ms(int depth, int npkt) { return (depth - 1) * npkt / 8.0; }
 
 /* ---- iso-OUT pacing ------------------------------------------------------
    Each packet carries what the DECK played in one earlier microframe, as
@@ -1366,7 +1372,12 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--iso-urb")) {
             if (i + 1 >= argc) { fprintf(stderr, "OpenV7: --iso-urb needs a packet count\n"); return 1; }
             g_iso_out_npkt = atoi(argv[++i]);
-            if (g_iso_out_npkt < 8 || g_iso_out_npkt > 40) { fprintf(stderr, "OpenV7: --iso-urb must be 8..40 packets (1..5 ms)\n"); return 1; }
+            /* Whole 1 ms frames only. libusb's Darwin backend schedules the next
+               transfer at frame + npkt / 8 with an INTEGER division, so a count
+               that is not a multiple of 8 overlaps the transfer after it by the
+               remainder (libusb 1.0.29 darwin_usb.c, darwin_submit_iso). */
+            if (g_iso_out_npkt < 8 || g_iso_out_npkt > 40 || g_iso_out_npkt % 8) {
+                fprintf(stderr, "OpenV7: --iso-urb must be 8, 16, 24, 32 or 40 packets (whole 1 ms frames)\n"); return 1; }
         }
         else if (!strcmp(argv[i], "--audio-buffer")) {
             if (i + 1 >= argc) { fprintf(stderr, "OpenV7: --audio-buffer needs a frame count\n"); return 1; }
@@ -1443,11 +1454,13 @@ int main(int argc, char **argv) {
                    "            CoreAudio IO buffer the bridge asks for when recording the\n"
                    "            Numark V7 device (default 256; 64 or 128 for low latency)\n"
                    "  --iso-urb PACKETS\n"
-                   "            microframes per iso-OUT URB, 8..40 (default 40 = 5 ms; 8 = 1 ms)\n"
+                   "            microframes per iso-OUT URB: 8, 16, 24, 32 or 40 (default 40 = 5 ms; 8 = 1 ms)\n"
                    "  --iso-depth N\n"
                    "            iso-OUT URBs in flight (default 16; 8 with audio). The deck's\n"
                    "            share of the latency is N x PACKETS / 8 ms: 40 ms by default,\n"
-                   "            4 ms with --iso-urb 8 --iso-depth 4. Lower = less latency,\n"
+                   "            6 ms with --iso-urb 8 --iso-depth 6. Keep (N - 1) x PACKETS / 8\n"
+                   "            at 4 ms or more: macOS schedules a resubmit 4 ms ahead, so a\n"
+                   "            shallower queue gaps (the bridge warns). Lower = less latency,\n"
                    "            higher = more dropout-proof. tools/latency-sweep.sh finds the floor.\n"
                    "  --no-rt   with audio on, the USB thread runs as a real-time thread;\n"
                    "            this keeps it at normal priority instead\n"
@@ -1604,6 +1617,11 @@ int main(int argc, char **argv) {
         audio_open_device(g_audio_dev, g_audio_ms, g_audio_buf, g_iso_out_npkt * V7FB_MAX_FRAMES,
                           g_audio_have_map ? g_audio_map : NULL, 1);
     g_iso_out_nxfer = g_iso_depth_req ? g_iso_depth_req : (audio_active() ? ISO_NXFER_AUDIO : ISO_NXFER);
+    if (iso_queued_after_completion_ms(g_iso_out_nxfer, g_iso_out_npkt) < ISO_MIN_QUEUED_MS)
+        fprintf(stderr, "OpenV7: WARNING: --iso-urb %d --iso-depth %d leaves %.1f ms queued after each completion; "
+                        "libusb's Darwin backend schedules a resubmit at least 4 ms ahead, so expect a gap "
+                        "(dropouts) on every URB. Keep (depth - 1) x packets / 8 >= 4.\n",
+                g_iso_out_npkt, g_iso_out_nxfer, iso_queued_after_completion_ms(g_iso_out_nxfer, g_iso_out_npkt));
     if (audio_active()) {
         fprintf(stderr, "OpenV7: audio: iso-OUT %d URBs x %d packets = %.1f ms queued to the deck.\n",
                 g_iso_out_nxfer, g_iso_out_npkt, g_iso_out_nxfer * g_iso_out_npkt / 8.0);

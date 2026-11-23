@@ -338,6 +338,17 @@ int main(void) {
         for (unsigned k = 0; k < sizeof p2; k++) n += midi_feed(&s, p2[k], o) > 0;
         if (n) fails++;
         printf("  %s   a note-on split across packets is still dropped (parsing stays packet-local)\n", n ? "FAIL" : "ok  "); }
+        /* iso-OUT queue floor (CodeRabbit, #18): the shipped presets and defaults
+       clear libusb's 4 ms Darwin lead; the old documented "4 ms" example did not. */
+    {   struct { int depth, npkt; int ok; const char *what; } c[] = {
+            {16, 40, 1, "default 16 x 40"}, {8, 40, 1, "audio default 8 x 40"},
+            {8, 16, 1, "Low preset 8 x 16"}, {8, 8, 1, "Lowest preset 8 x 8"},
+            {6, 8, 1, "6 x 8 (documented example)"}, {5, 8, 1, "5 x 8 (4 ms queued: the floor)"},
+            {4, 8, 0, "4 x 8 gaps on every resubmit"}, {2, 8, 0, "2 x 8 gaps"}, {3, 16, 1, "3 x 16 (4 ms queued: also the floor)"} };
+        for (unsigned k = 0; k < sizeof c / sizeof *c; k++) {
+            int ok = (iso_queued_after_completion_ms(c[k].depth, c[k].npkt) >= ISO_MIN_QUEUED_MS) == c[k].ok;
+            if (!ok) fails++;
+            printf("  %s   iso queue %s\n", ok ? "ok  " : "FAIL", c[k].what); } }
     printf(fails ? "\n%d FAILED\n" : "\nall passed\n", fails);
     return fails != 0;
 }
